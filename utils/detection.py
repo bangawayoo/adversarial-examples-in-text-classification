@@ -92,7 +92,7 @@ def get_train_features(model, tokenizer, args, batch_size, dataset, text_key, la
   return features
 
 
-def __get_test_features(model, tokenizer, batch_size, dataset, eps=1e-3):
+def get_test_features(model, tokenizer, batch_size, dataset, eps=1e-3):
   # dataset, batch_size, i = testset['text'].tolist(), 64, 0
   # gt = testset['ground_truth_output']
   num_samples = len(dataset)
@@ -240,7 +240,6 @@ def detect_attack(testset, confidence, conf_indices, fpr_thres=0.05, visualize=F
   target[target==-1] = 1
   conf = confidence.numpy()
   testset['negative_conf'] = -conf # negative of confidence : likelihood of adv. probability
-
 
   if by_class:
     # TODO : devise metric for whole class

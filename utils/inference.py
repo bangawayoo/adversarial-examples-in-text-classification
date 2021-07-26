@@ -137,10 +137,7 @@ def predict_by_confidence(confidence, distance, gt, adv_count, total):
 def predict_clean_samples(model, tokenizer, batch_size, dataset, gt):
   # Compute Acc. on dataset
   num_samples = len(dataset)
-  label_list = np.unique(dataset)
-  num_labels = len(label_list)
   num_batches = int((num_samples // batch_size) + 1)
-  adv_idx = []
 
   correct = 0
   total = 0
@@ -160,12 +157,10 @@ def predict_clean_samples(model, tokenizer, batch_size, dataset, gt):
       preds = torch.max(output.logits, dim=1).indices
       correct += y.eq(preds).sum().item()
       total += preds.size(0)
-      incorrect_indices = preds.ne(y).long().cpu().numpy()
-      adv_idx.append(incorrect_indices)
 
 
   print(f"Clean Acc. {correct/total:.3f}")
-  return correct, total, np.concatenate(adv_idx, axis=0)
+  return correct, total
 
 def predict_dataset(model, tokenizer, batch_size, dataset, text_key):
   # Compute Acc. on dataset

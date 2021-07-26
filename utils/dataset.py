@@ -6,10 +6,14 @@
 #
 import os
 import pickle
+import re
 
+import torch
 from datasets import load_dataset
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
+
 
 def load_data(args):
     if args.dataset == "ag_news":
@@ -65,7 +69,7 @@ def read_testset_from_csv(filename, use_original=False, split_type='disjoint_sub
     t = t.replace("]", "")
     return t
 
-  filename = args.adv_from_file
+  # filename = args.adv_from_file
   df = pd.read_csv(filename)
   df.loc[df.result_type == 'Failed', 'result_type'] = 0
   df.loc[df.result_type == 'Successful', 'result_type'] = 1
@@ -123,20 +127,74 @@ def read_testset_from_csv(filename, use_original=False, split_type='disjoint_sub
 
   return testset, df
 
-def read_testset_from_pkl(filename):
+def __read_testset_from_pkl(filename, model, tokenizer):
   #Input : pkl file name
     # adv_examples.pkl : list of dict with keys below
     # dict_keys(['clean', 'perturbed', 'clean_pred', 'label', 'perturbed_pred', 'perturbed_idxs'])
     # 'clean' and 'perturbed' are list of tokens
   #Output: return pd.DataFrame type similar to read_testset_from_csv()
     # columns: text, result_type, ground_truth_output,
-  filename = "adv_examples.pkl"
+  def clean_string(string):
+    string = string.replace("<br />", "")
+    string = re.sub(r"[^a-zA-Z0-9.]+", " ", string)
+    return string.strip().lower()
+
+  batch_size=128
   with open(filename, 'rb') as h :
     pkl_samples = pickle.load(h)
 
   df = pd.DataFrame.from_records(pkl_samples)
-  adv_index = (df['label']!=df['perturbed_pred']) & (df['label']==df['clean_pred'])
-  adv_samples = df.loc[adv_index, ['perturbed', 'label']]
+  df['perturbed'] = df['perturbed'].apply(lambda x: " ".join(x))
+  # df['perturbed'] = df['perturbed'].apply(clean_string)
+  df['clean'] = df['clean'].apply(lambda x: " ".join(x))
+  # df['clean'] = df['clean'].apply(clean_string)
+
+  dataset = df[['perturbed', 'clean']]
+  gt = df['label'].tolist()
+  # Compute Acc. on dataset
+  num_samples = len(dataset)
+  num_batches = int((num_samples // batch_size) + 1)
+  target_adv_indices = []
+
+  correct = 0
+  adv_correct = 0
+  total = 0
+  # num_batches = 2
+  with torch.no_grad():
+    for i in tqdm(range(num_batches)):
+      lower = i * batch_size
+      upper = min((i + 1) * batch_size, num_samples)
+      adv_examples = dataset['perturbed'][lower:upper].tolist()
+      clean_examples = dataset['clean'][lower:upper].tolist()
+      labels = gt[lower:upper]
+      y = torch.LongTensor(labels).cuda()
+      x = tokenizer(adv_examples, padding='max_length', max_length=256,
+                    truncation=True, return_tensors='pt')
+      output = model(input_ids=x['input_ids'].cuda(), attention_mask=x['attention_mask'].cuda(),
+                     token_type_ids=(x['token_type_ids'].cuda() if 'token_type_ids' in x else None),
+                     output_hidden_states=True)
+      preds = torch.max(output.logits, dim=1).indices
+      adv_correct += y.eq(preds).sum().item()
+      adv_error_idx = preds.ne(y)
+
+      x = tokenizer(clean_examples, padding='max_length', max_length=256,
+                    truncation=True, return_tensors='pt')
+      output = model(input_ids=x['input_ids'].cuda(), attention_mask=x['attention_mask'].cuda(),
+                     token_type_ids=(x['token_type_ids'].cuda() if 'token_type_ids' in x else None),
+                     output_hidden_states=True)
+      preds = torch.max(output.logits, dim=1).indices
+      correct += y.eq(preds).sum().item()
+      total += preds.size(0)
+      clean_correct_idx = preds.eq(y)
+
+      target_adv_idx = torch.logical_and(adv_error_idx, clean_correct_idx)
+      target_adv_indices.append(target_adv_idx.cpu().numpy())
+
+  print(f"Clean Accuracy {correct/total}")
+  print(f"Robust Accuracy {adv_correct/total}")
+  target_adv_indices = np.concatenate(target_adv_indices, axis=0)
+  print(f"Percentage of Adv. samples {target_adv_indices.sum() / total}")
+  adv_samples = df[target_adv_indices][['perturbed', 'label']]
   adv_samples = adv_samples.rename(columns={'perturbed':'text'})
   adv_samples['result_type'] = 1
   clean_samples = df[['clean', 'label']]
@@ -145,7 +203,84 @@ def read_testset_from_pkl(filename):
 
   testset = pd.concat([adv_samples, clean_samples], axis=0)
   testset = testset.rename(columns={'label':'ground_truth_output'})
-  testset['text'] = testset['text'].apply(lambda x: " ".join(x))
-  # testset['text'] = testset['text'].apply(lambda x: x.replace(" .", "."))
+
+  return testset
+
+
+def read_testset_from_pkl(filename, model, tokenizer):
+  #Input : pkl file name
+    # adv_examples.pkl : list of dict with keys below
+    # dict_keys(['clean', 'perturbed', 'clean_pred', 'label', 'perturbed_pred', 'perturbed_idxs'])
+    # 'clean' and 'perturbed' are list of tokens
+  #Output: return pd.DataFrame type similar to read_testset_from_csv()
+    # columns: text, result_type, ground_truth_output,
+  def clean_string(string):
+    string = string.replace("<br />", "")
+    string = re.sub(r"[^a-zA-Z0-9.]+", " ", string)
+    return string.strip().lower()
+
+  batch_size=128
+  with open(filename, 'rb') as h :
+    pkl_samples = pickle.load(h)
+
+  df = pd.DataFrame.from_records(pkl_samples)
+  df['perturbed'] = df['perturbed'].apply(lambda x: " ".join(x))
+  # df['perturbed'] = df['perturbed'].apply(clean_string)
+  df['clean'] = df['clean'].apply(lambda x: " ".join(x))
+  # df['clean'] = df['clean'].apply(clean_string)
+
+  dataset = df[['perturbed', 'clean']]
+  gt = df['label'].tolist()
+  # Compute Acc. on dataset
+  num_samples = len(dataset)
+  num_batches = int((num_samples // batch_size) + 1)
+  target_adv_indices = []
+
+  correct = 0
+  adv_correct = 0
+  total = 0
+  # num_batches = 2
+  with torch.no_grad():
+    for i in tqdm(range(num_batches)):
+      lower = i * batch_size
+      upper = min((i + 1) * batch_size, num_samples)
+      adv_examples = dataset['perturbed'][lower:upper].tolist()
+      clean_examples = dataset['clean'][lower:upper].tolist()
+      labels = gt[lower:upper]
+      y = torch.LongTensor(labels).cuda()
+      x = tokenizer(adv_examples, max_length=256, add_special_tokens=True, pad_to_max_length=True, return_attention_mask=True, return_tensors='pt')
+      output = model(input_ids=x['input_ids'].cuda(), attention_mask=x['attention_mask'].cuda(),
+                     token_type_ids=(x['token_type_ids'].cuda() if 'token_type_ids' in x else None),
+                     output_hidden_states=True)
+      preds = torch.max(output.logits, dim=1).indices
+      adv_correct += y.eq(preds).sum().item()
+      adv_error_idx = preds.ne(y)
+
+      x = tokenizer(clean_examples, padding='max_length', max_length=200,
+                    truncation=True, return_tensors='pt')
+      output = model(input_ids=x['input_ids'].cuda(), attention_mask=x['attention_mask'].cuda(),
+                     token_type_ids=(x['token_type_ids'].cuda() if 'token_type_ids' in x else None),
+                     output_hidden_states=True)
+      preds = torch.max(output.logits, dim=1).indices
+      correct += y.eq(preds).sum().item()
+      total += preds.size(0)
+      clean_correct_idx = preds.eq(y)
+
+      target_adv_idx = torch.logical_and(adv_error_idx, clean_correct_idx)
+      target_adv_indices.append(target_adv_idx.cpu().numpy())
+
+  print(f"Clean Accuracy {correct/total}")
+  print(f"Robust Accuracy {adv_correct/total}")
+  target_adv_indices = np.concatenate(target_adv_indices, axis=0)
+  print(f"Percentage of Adv. samples {target_adv_indices.sum() / total}")
+  adv_samples = df[target_adv_indices][['perturbed', 'label']]
+  adv_samples = adv_samples.rename(columns={'perturbed':'text'})
+  adv_samples['result_type'] = 1
+  clean_samples = df[['clean', 'label']]
+  clean_samples = clean_samples.rename(columns={'clean':'text'})
+  clean_samples['result_type'] = 0
+
+  testset = pd.concat([adv_samples, clean_samples], axis=0)
+  testset = testset.rename(columns={'label':'ground_truth_output'})
 
   return testset

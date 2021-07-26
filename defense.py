@@ -37,8 +37,11 @@ LAYER = -1
 
 if __name__ == "__main__":
   model = AutoModelForSequenceClassification.from_pretrained(args.target_model, output_hidden_states=True).cuda()
+  # ckpt = torch.load("fgws_ckpt/model.pth")['model_state_dict']
+  # model.load_state_dict(ckpt)
   model.eval()
   tokenizer = AutoTokenizer.from_pretrained(args.target_model, use_fast=True)
+  # tokenizer = AutoTokenizer.from_pretrained('roberta-base', do_lower_case=True)
 
   trainvalset, _, key = get_dataset(args)
   text_key, testset_key = key
@@ -47,7 +50,7 @@ if __name__ == "__main__":
   train_stats = get_stats(train_features, use_shared_cov=True)
 
   testset, raw_testset = read_testset_from_csv(args.adv_from_file, use_original=False, split_type='fgws', split_ratio=0.6, seed=2)  # returns pandas dataframe
-  # testset = read_testset_from_pkl("adv_examples.pkl")  # returns pandas dataframe
+  # testset = read_testset_from_pkl("adv_examples.pkl", model, tokenizer)  # returns pandas dataframe
   total, adv_count = testset.result_type.value_counts().sum(), testset.result_type.value_counts()[1]
   print(f"Adv success rate {adv_count}/{total} : {adv_count / total}")
 
@@ -66,16 +69,17 @@ if __name__ == "__main__":
 
   num_nans = probs[probs==-float("Inf")].sum()
   print(f"{num_nans} Nans in prob")
-  confidence = confidence + probs.squeeze()
-  confidence[confidence==-float("Inf")] = -1e6
-  confidence[torch.isnan(confidence)] = -1e6
+  refined_confidence = confidence + probs.squeeze()
+  refined_confidence[refined_confidence==-float("Inf")] = -1e6
+  refined_confidence[torch.isnan(refined_confidence)] = -1e6
 
   # Detect attacks for correctly classified samples
   fpr_thres = 0.093
   adv_count = testset.loc[testset['result_type']==1].shape[0]
   correct_idx = np.array(testset['result_type']!=-1)
   correct_set = testset.loc[correct_idx]
-  roc, auc = detect_attack(correct_set, confidence[correct_idx], conf_indices[correct_idx], fpr_thres, visualize=True, by_class=False)
+  #TODO: Calcuate precision, recall
+  roc, auc = detect_attack(correct_set, refined_confidence[correct_idx], conf_indices[correct_idx], fpr_thres, visualize=False, by_class=False)
 
   """
   Inference Stage:
@@ -93,11 +97,6 @@ if __name__ == "__main__":
 
   detected_clean, y = testset.loc[testset['pred_type']==0, 'text'], testset.loc[testset['pred_type']==0, 'ground_truth_output']
   detected_clean, y = testset.loc[testset['result_type']==1, 'text'], testset.loc[testset['result_type']==1, 'ground_truth_output']
-  clean_cor, clean_total, adv_idx = predict_clean_samples(model, tokenizer, 128, detected_clean.tolist(), y.tolist())
+  clean_cor, clean_total = predict_clean_samples(model, tokenizer, 128, detected_clean.tolist(), y.tolist())
   print(f"Total Acc. {(adv_cor + clean_cor)/ (adv_total+clean_total):.3f}")
 
-
-# gt = testset['ground_truth_output'].values
-# ((testset['pred_type'] == testset['result_type']) & (testset['result_type']==0)).sum()
-# conf_indices[testset.result_type==-1].eq(torch.tensor(gt[testset.result_type==-1])).sum()
-# adv_error =testset.loc[(testset['pred_type'] == 1) & (testset['result_type']==-1)]
