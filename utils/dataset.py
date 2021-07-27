@@ -14,6 +14,8 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
+from utils.preprocess import *
+
 
 def load_data(args):
     if args.dataset == "ag_news":
@@ -127,86 +129,6 @@ def read_testset_from_csv(filename, use_original=False, split_type='disjoint_sub
 
   return testset, df
 
-def __read_testset_from_pkl(filename, model, tokenizer):
-  #Input : pkl file name
-    # adv_examples.pkl : list of dict with keys below
-    # dict_keys(['clean', 'perturbed', 'clean_pred', 'label', 'perturbed_pred', 'perturbed_idxs'])
-    # 'clean' and 'perturbed' are list of tokens
-  #Output: return pd.DataFrame type similar to read_testset_from_csv()
-    # columns: text, result_type, ground_truth_output,
-  def clean_string(string):
-    string = string.replace("<br />", "")
-    string = re.sub(r"[^a-zA-Z0-9.]+", " ", string)
-    return string.strip().lower()
-
-  batch_size=128
-  with open(filename, 'rb') as h :
-    pkl_samples = pickle.load(h)
-
-  df = pd.DataFrame.from_records(pkl_samples)
-  df['perturbed'] = df['perturbed'].apply(lambda x: " ".join(x))
-  # df['perturbed'] = df['perturbed'].apply(clean_string)
-  df['clean'] = df['clean'].apply(lambda x: " ".join(x))
-  # df['clean'] = df['clean'].apply(clean_string)
-
-  dataset = df[['perturbed', 'clean']]
-  gt = df['label'].tolist()
-  # Compute Acc. on dataset
-  num_samples = len(dataset)
-  num_batches = int((num_samples // batch_size) + 1)
-  target_adv_indices = []
-
-  correct = 0
-  adv_correct = 0
-  total = 0
-  # num_batches = 2
-  with torch.no_grad():
-    for i in tqdm(range(num_batches)):
-      lower = i * batch_size
-      upper = min((i + 1) * batch_size, num_samples)
-      adv_examples = dataset['perturbed'][lower:upper].tolist()
-      clean_examples = dataset['clean'][lower:upper].tolist()
-      labels = gt[lower:upper]
-      y = torch.LongTensor(labels).cuda()
-      x = tokenizer(adv_examples, padding='max_length', max_length=256,
-                    truncation=True, return_tensors='pt')
-      output = model(input_ids=x['input_ids'].cuda(), attention_mask=x['attention_mask'].cuda(),
-                     token_type_ids=(x['token_type_ids'].cuda() if 'token_type_ids' in x else None),
-                     output_hidden_states=True)
-      preds = torch.max(output.logits, dim=1).indices
-      adv_correct += y.eq(preds).sum().item()
-      adv_error_idx = preds.ne(y)
-
-      x = tokenizer(clean_examples, padding='max_length', max_length=256,
-                    truncation=True, return_tensors='pt')
-      output = model(input_ids=x['input_ids'].cuda(), attention_mask=x['attention_mask'].cuda(),
-                     token_type_ids=(x['token_type_ids'].cuda() if 'token_type_ids' in x else None),
-                     output_hidden_states=True)
-      preds = torch.max(output.logits, dim=1).indices
-      correct += y.eq(preds).sum().item()
-      total += preds.size(0)
-      clean_correct_idx = preds.eq(y)
-
-      target_adv_idx = torch.logical_and(adv_error_idx, clean_correct_idx)
-      target_adv_indices.append(target_adv_idx.cpu().numpy())
-
-  print(f"Clean Accuracy {correct/total}")
-  print(f"Robust Accuracy {adv_correct/total}")
-  target_adv_indices = np.concatenate(target_adv_indices, axis=0)
-  print(f"Percentage of Adv. samples {target_adv_indices.sum() / total}")
-  adv_samples = df[target_adv_indices][['perturbed', 'label']]
-  adv_samples = adv_samples.rename(columns={'perturbed':'text'})
-  adv_samples['result_type'] = 1
-  clean_samples = df[['clean', 'label']]
-  clean_samples = clean_samples.rename(columns={'clean':'text'})
-  clean_samples['result_type'] = 0
-
-  testset = pd.concat([adv_samples, clean_samples], axis=0)
-  testset = testset.rename(columns={'label':'ground_truth_output'})
-
-  return testset
-
-
 def read_testset_from_pkl(filename, model, tokenizer):
   #Input : pkl file name
     # adv_examples.pkl : list of dict with keys below
@@ -214,20 +136,15 @@ def read_testset_from_pkl(filename, model, tokenizer):
     # 'clean' and 'perturbed' are list of tokens
   #Output: return pd.DataFrame type similar to read_testset_from_csv()
     # columns: text, result_type, ground_truth_output,
-  def clean_string(string):
-    string = string.replace("<br />", "")
-    string = re.sub(r"[^a-zA-Z0-9.]+", " ", string)
-    return string.strip().lower()
-
   batch_size=128
   with open(filename, 'rb') as h :
+    print(f"Loading {filename}")
     pkl_samples = pickle.load(h)
 
+  softmax = torch.nn.Softmax(dim=1)
   df = pd.DataFrame.from_records(pkl_samples)
-  df['perturbed'] = df['perturbed'].apply(lambda x: " ".join(x))
-  # df['perturbed'] = df['perturbed'].apply(clean_string)
-  df['clean'] = df['clean'].apply(lambda x: " ".join(x))
-  # df['clean'] = df['clean'].apply(clean_string)
+  df['perturbed'] = df['perturbed'].apply(fgws_preprocess)
+  df['clean'] = df['clean'].apply(fgws_preprocess)
 
   dataset = df[['perturbed', 'clean']]
   gt = df['label'].tolist()
@@ -239,7 +156,9 @@ def read_testset_from_pkl(filename, model, tokenizer):
   correct = 0
   adv_correct = 0
   total = 0
-  # num_batches = 2
+  adv_pred = []
+  clean_pred = []
+
   with torch.no_grad():
     for i in tqdm(range(num_batches)):
       lower = i * batch_size
@@ -248,20 +167,26 @@ def read_testset_from_pkl(filename, model, tokenizer):
       clean_examples = dataset['clean'][lower:upper].tolist()
       labels = gt[lower:upper]
       y = torch.LongTensor(labels).cuda()
-      x = tokenizer(adv_examples, max_length=256, add_special_tokens=True, pad_to_max_length=True, return_attention_mask=True, return_tensors='pt')
+      # x = tokenizer.batch_encode_plus(adv_examples, max_length=256, add_special_tokens=True, padding=True,
+      #               return_attention_mask=True, truncation=True, return_tensors='pt')
+      x = tokenizer.batch_encode_plus(adv_examples, max_length=256, add_special_tokens=True, pad_to_max_length=True,
+                    return_attention_mask=True, return_tensors='pt')
       output = model(input_ids=x['input_ids'].cuda(), attention_mask=x['attention_mask'].cuda(),
                      token_type_ids=(x['token_type_ids'].cuda() if 'token_type_ids' in x else None),
-                     output_hidden_states=True)
+                     output_hidden_states=False)
       preds = torch.max(output.logits, dim=1).indices
+      adv_pred.append(preds.cpu().numpy())
+      prob = softmax(output.logits)
       adv_correct += y.eq(preds).sum().item()
       adv_error_idx = preds.ne(y)
 
-      x = tokenizer(clean_examples, padding='max_length', max_length=200,
-                    truncation=True, return_tensors='pt')
+      x = tokenizer.batch_encode_plus(clean_examples, max_length=256, add_special_tokens=True, padding=True,
+                    return_attention_mask=True, truncation=True, return_tensors='pt')
       output = model(input_ids=x['input_ids'].cuda(), attention_mask=x['attention_mask'].cuda(),
                      token_type_ids=(x['token_type_ids'].cuda() if 'token_type_ids' in x else None),
-                     output_hidden_states=True)
+                     output_hidden_states=False)
       preds = torch.max(output.logits, dim=1).indices
+      clean_pred.append(preds.cpu().numpy())
       correct += y.eq(preds).sum().item()
       total += preds.size(0)
       clean_correct_idx = preds.eq(y)
@@ -269,9 +194,23 @@ def read_testset_from_pkl(filename, model, tokenizer):
       target_adv_idx = torch.logical_and(adv_error_idx, clean_correct_idx)
       target_adv_indices.append(target_adv_idx.cpu().numpy())
 
+  target_adv_indices = np.concatenate(target_adv_indices, axis=0)
+  # adv_pred = np.concatenate(adv_pred, axis=0)[target_adv_indices]
+  # clean_pred = np.concatenate(clean_pred, axis=0)
+  # fgws_adv_pred = df['perturbed_pred'].values[target_adv_indices]
+  # fgws_adv_pred[np.isnan(fgws_adv_pred)] = adv_pred[np.isnan(fgws_adv_pred)]
+  # adv_pred_diff = (np.not_equal(adv_pred, fgws_adv_pred)).sum()
+  adv_pred = np.concatenate(adv_pred, axis=0)
+  clean_pred = np.concatenate(clean_pred, axis=0)
+  fgws_adv_pred = df['perturbed_pred'].values
+  fgws_adv_pred[np.isnan(fgws_adv_pred)] = adv_pred[np.isnan(fgws_adv_pred)]
+  adv_pred_diff = (np.not_equal(adv_pred, fgws_adv_pred)).sum()
+  clean_pred_diff = (np.not_equal(clean_pred, df['clean_pred'].values)).sum()
+  incorrect_indices = np.not_equal(df['clean_pred'].values, df['label'].values)
+  print(f"# of adv. predictions different : {adv_pred_diff}")
+  print(f"# of clean predictions different : {clean_pred_diff}")
   print(f"Clean Accuracy {correct/total}")
   print(f"Robust Accuracy {adv_correct/total}")
-  target_adv_indices = np.concatenate(target_adv_indices, axis=0)
   print(f"Percentage of Adv. samples {target_adv_indices.sum() / total}")
   adv_samples = df[target_adv_indices][['perturbed', 'label']]
   adv_samples = adv_samples.rename(columns={'perturbed':'text'})
@@ -282,5 +221,10 @@ def read_testset_from_pkl(filename, model, tokenizer):
 
   testset = pd.concat([adv_samples, clean_samples], axis=0)
   testset = testset.rename(columns={'label':'ground_truth_output'})
+
+  problem = df[np.not_equal(adv_pred, fgws_adv_pred)]
+  label = problem['label']
+  fgws_perturbed_pred = problem['perturbed_pred']
+  fgws_clean_pred = problem['clean_pred']
 
   return testset

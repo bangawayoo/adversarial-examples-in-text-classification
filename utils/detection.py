@@ -1,6 +1,8 @@
 import math
 import os
 import pickle
+import re
+
 from tqdm import tqdm
 
 import torch
@@ -50,7 +52,7 @@ def get_stats(features, use_shared_cov=False):
 def get_train_features(model, tokenizer, args, batch_size, dataset, text_key, layer=-1):
   assert layer=='pooled' or layer < 0 , "Layer either has to be a int between -12~-1 or the pooling layer"
   model_name = os.path.basename(args.target_model)
-  model_name += f"-layer_{layer}"
+  model_name += f"-layer_{layer}-fgws"
 
   if os.path.exists(f"saved_feats/{model_name}.pkl"):
     with open(f"saved_feats/{model_name}.pkl", "rb") as handle:
@@ -92,7 +94,7 @@ def get_train_features(model, tokenizer, args, batch_size, dataset, text_key, la
   return features
 
 
-def get_test_features(model, tokenizer, batch_size, dataset, eps=1e-3):
+def __get_test_features(model, tokenizer, batch_size, dataset, eps=1e-3):
   # dataset, batch_size, i = testset['text'].tolist(), 64, 0
   # gt = testset['ground_truth_output']
   num_samples = len(dataset)
@@ -149,8 +151,8 @@ def get_test_features(model, tokenizer, batch_size, dataset, perturb=False, topk
       lower = i * batch_size
       upper = min((i + 1) * batch_size, num_samples)
       examples = dataset[lower:upper]
-      x = tokenizer(examples, padding='max_length', max_length=256,
-                    truncation=True, return_tensors='pt')
+      x = tokenizer(examples, max_length=256, add_special_tokens=True, padding=True,
+                    return_attention_mask=True, truncation=True, return_tensors='pt')
       output = model(input_ids=x['input_ids'].cuda(), attention_mask=x['attention_mask'].cuda(),
                      token_type_ids=(x['token_type_ids'].cuda() if 'token_type_ids' in x else None),
                      output_hidden_states=True, output_attentions=True)
@@ -172,7 +174,7 @@ def get_test_features(model, tokenizer, batch_size, dataset, perturb=False, topk
           else:
             T = 0.5
             inner_product = torch.exp(inner_product/T) / torch.exp(inner_product/T).sum(-1, keepdims=True)
-          topk_log_prob = torch.log(torch.topk(inner_product, topk).values)
+          topk_log_prob = torch.log(torch.topk(inner_product, topk, dim=1).values)
           log_prob_sum = torch.sum(topk_log_prob,1, keepdim=True)
           features.append(feat.cpu())
           probs.append(log_prob_sum.cpu())
@@ -187,7 +189,7 @@ def get_test_features(model, tokenizer, batch_size, dataset, perturb=False, topk
           conditional_prob = conditional_prob / conditional_prob.sum(-1, keepdim=True) #(batch_size, seq_len)
           # conditional_prob[conditional_prob <= 0] = 1
           conditional_prob = conditional_prob.double()
-          topk_prob = torch.topk(conditional_prob, topk).values
+          topk_prob = torch.topk(conditional_prob, topk, dim=1).values
           topk_prob[topk_prob <=0] = 1
           log_prob_sum = torch.sum(torch.log(topk_prob), dim=-1)
           # product_prob = torch.sum(topk_log_prob,1, keepdim=True)
@@ -256,7 +258,6 @@ def detect_attack(testset, confidence, conf_indices, fpr_thres=0.05, visualize=F
       if visualize:
         # ax = sns.boxplot(x='result_type', y='negative_conf', data=testset[(conf_indices == idx).numpy()])
         # plt.show()
-
         ax = plt.subplot()
         kwargs = dict(histtype='stepfilled', alpha=0.3, bins=50, density=False)
         data = testset[(conf_indices==idx).numpy()]
@@ -272,8 +273,9 @@ def detect_attack(testset, confidence, conf_indices, fpr_thres=0.05, visualize=F
     # Class-agnostic
     fpr, tpr, thres1 = roc_curve(target, -conf)
     precision, recall, thres2 = precision_recall_curve(target, -conf)
-    mask = (fpr > fpr_thres)
-    tpr_at_fpr = np.unique(tpr * mask)[1]  # Minimum tpr that is larger than 0
+    mask = (fpr <= fpr_thres)
+    tpr_at_fpr = np.max(tpr * mask) # Maximum tpr at fpr <= fpr_thres
+    roc_cutoff = np.sort(np.unique(mask*thres1))[1]
     print(f"TPR at FPR={fpr_thres} : {tpr_at_fpr}")
     if visualize:
       # ax = sns.boxplot(x='result_type', y='negative_conf', data=testset)
@@ -284,6 +286,8 @@ def detect_attack(testset, confidence, conf_indices, fpr_thres=0.05, visualize=F
       ax.hist(x=x1, label='clean', **kwargs)
       x2 = testset.loc[testset.result_type==1, ['negative_conf']].values.squeeze()
       ax.hist(x=x2, label='adv', **kwargs)
+      ax.annotate(f'{int(roc_cutoff)}', xy=(roc_cutoff,0), xytext=(roc_cutoff,30), fontsize=14,
+                  arrowprops=dict(facecolor='black', width=1, shrink=0.1, headwidth=3))
       ax.legend()
       plt.show()
 
