@@ -7,7 +7,7 @@ from textattack.goal_functions import UntargetedClassification
 from textattack.search_methods import GreedyWordSwapWIR
 from textattack.transformations import WordSwapEmbedding
 
-def TextFoolerJin2019Adjusted(model, SE_thresh=0.98, word_thres=0.7, sentence_encoder='bert'):
+def TextFoolerJin2019Adjusted(model, SE_thresh=0.98, word_thres=0.9, sentence_encoder='bert'):
     """
         Jin, D., Jin, Z., Zhou, J.T., & Szolovits, P. (2019). 
         
