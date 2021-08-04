@@ -26,9 +26,11 @@ def pad(max_len, seq, token):
 		seq += [token] * (max_len - abs_len)
 	return seq
 
-def fgws_preprocess(token_list):
-	sentence = " ".join(token_list)
+def fgws_preprocess(sentence):
 	sentence = clean_str(sentence)
 	sentence = pad(200, sentence, "<pad>")
 	sentence = ' '.join(sentence)
 	return sentence
+
+def standard_preprocess(setence):
+	pass
