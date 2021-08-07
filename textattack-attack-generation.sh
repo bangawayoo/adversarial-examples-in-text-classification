@@ -2,7 +2,7 @@
 
 DATASET="imdb"
 RECIPE="pwws textfooler bae"
-MODEL="bert-base-uncased-${DATASET} roberta-base-${DATASET}"
+MODEL="bert-base-uncased-${DATASET}"
 for recipe in $RECIPE
 do
   for model in $MODEL
