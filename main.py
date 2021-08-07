@@ -7,19 +7,22 @@ import pandas as pd
 
 parser = argparse.ArgumentParser(description="Detect and defense attacked samples")
 
-parser.add_argument("--dataset", default="sst2", type=str,
+parser.add_argument("--dataset", default="imdb", type=str,
                     choices=["dbpedia14", "ag_news", "imdb", "yelp", "mnli", "sst2"],
                     help="classification dataset to use")
 parser.add_argument("--preprocess", default="standard", type=str,
                     choices=["standard", "fgws"])
-parser.add_argument("--target_model", default="textattack/roberta-base-SST-2", type=str, #textattack/roberta-base-SST-2
+parser.add_argument("--target_model", default="textattack/roberta-base-imdb", type=str, #textattack/roberta-base-SST-2
                     help="type of model (textattack pretrained model, path to ckpt)")
-parser.add_argument("--adv_from_file", default="attack-from-fgws/sst2/random-test.pkl", type=str,
-                    help="perturbed texts from csv or pkl")
-parser.add_argument("--attack_type", default='random', type=str,
+parser.add_argument("--test_adv", default="attack-log/imdb/roberta/tf-adj/roberta-base-imdb_tf-adj-test.csv", type=str,
+                    help="perturbed texts files with extension csv or pkl")
+parser.add_argument("--val_adv", default="attack-log/imdb/roberta/tf-adj/roberta-base-imdb_tf-adj-val.csv", type=str,
+                    help="perturbed texts files with extension csv or pkl")
+parser.add_argument("--attack_type", default='tf-adj', type=str,
                     help="attack type for logging")
-parser.add_argument("--fpr_threshold", default=0.114)
-parser.add_argument("--split_ratio", default=1.0)
+
+parser.add_argument("--fpr_threshold", default=0.05)
+# parser.add_argument("--split_ratio", default=1.0)
 
 parser.add_argument("--gpu", default='1', type=str)
 parser.add_argument("--mnli_option", default="matched", type=str,
@@ -39,6 +42,7 @@ from utils.preprocess import *
 from utils.logger import *
 from utils.miscellaneous import *
 from models.wrapper import BertWrapper
+from GridSearch import GridSearch
 
 import torch
 from transformers import AutoConfig, AutoTokenizer, AutoModelForSequenceClassification
@@ -49,7 +53,7 @@ ADV_RATIO=None
 LAYER = -1
 
 model_type = args.target_model.replace("/","-")
-assert args.attack_type in args.adv_from_file, f"Attack Type Error: Check if {args.adv_from_file} is based on {args.attack_type} method"
+assert args.attack_type in args.test_adv, f"Attack Type Error: Check if {args.test_adv} is based on {args.attack_type} method"
 args.log_path = f"runs/{args.dataset}/{model_type}/{args.attack_type}"
 
 if __name__ == "__main__":
@@ -64,81 +68,33 @@ if __name__ == "__main__":
 
   trainvalset, _, key = get_dataset(args)
   text_key, testset_key = key
-  trainset, _ = split_dataset(trainvalset, split='trainval', split_ratio=args.split_ratio)
+  trainset, _ = split_dataset(trainvalset, split='trainval', split_ratio=1.0)
   train_features = get_train_features(model_wrapper, args, batch_size=512, dataset=trainset, text_key=text_key, layer=LAYER)
   train_stats = get_stats(train_features, use_shared_cov=True)
 
-  if args.adv_from_file.endswith(".csv"):
-    testset, raw_testset = read_testset_from_csv(args.adv_from_file, use_original=False, split_type='random_sample', split_ratio=0.6, seed=2)  # returns pandas dataframe
-  if args.adv_from_file.endswith(".pkl"):
-    testset = read_testset_from_pkl(args.adv_from_file, model_wrapper, batch_size=128, logger=logger)  # returns pandas dataframe
-  logger.log.info(f"--------Loaded {args.adv_from_file}...---------")
+  tune_params = {'topk': {'start':0, 'end':200, 'step':5}}
+  params = {
+    "model_param": {'type': 'attention', 'normalization': 'softmax', 'tempearture': 1.0, 'attention_type': 'key'},
+    'layer_param': {'cls_layer': -1, 'num_layer': 1},
+    'prob_param': {'choose_type': 'topk', 'topk': 0, 'sum_heads': True, 'p': 0}}
+  tuner = GridSearch(tune_params, model_wrapper, args.val_adv, train_stats, logger, params, seed=0)
+  pdb.set_trace()
+  tuner.tune(fpr_thres=args.fpr_threshold)
+  roc, auc, tpr_at_fpr, conf, testset = tuner.test(args.test_adv, args.fpr_threshold)
 
-  total, adv_count = testset.result_type.value_counts().sum(), testset.result_type.value_counts()[1]
-  logger.log.info(f"Percentage of Adv. Samples: {adv_count}/{total} : {adv_count / (total)}")
 
-  texts = testset['text'].tolist()
-  logger.log.info("------Building test features...-------")
+  BOOTSTRAP = False
+  if BOOTSTRAP:
+    # Compute bootstrap scores
+    target = testset.result_type.values
+    scores = compute_bootstrap_score(conf, target, roc, args.fpr_threshold)
 
-  best = 0
-  best_k = 0
-  best_roc = None
-  start_k, end_k, step_k = 0, 60, 5
-  start_p, end_p, step_p = 0, 1, 1
-  for k in range(start_k, end_k, step_k):
-    for p in np.arange(start_p, end_p, step_p):
-      print(k)
-      params = {"model_param": {'type': 'attention', 'normalization': 'softmax', 'tempearture': 1.0, 'attention_type':'key'},
-                'layer_param': {'cls_layer': -1, 'num_layer':1},
-                'prob_param': {'choose_type':'topk', 'topk':k, 'sum_heads':True, 'p':p}}
+    logger.log.info("-----Bootstrapped Results-----")
+    for k, v in scores.items():
+      logger.log.info(f"{k}: {v:.4f}")
 
-      test_features, probs = get_test_features(model_wrapper, batch_size=128, dataset=texts, params=params, logger=logger)
-      confidence, conf_indices, distance = compute_dist(test_features, train_stats, distance_type="euclidean", use_marginal=False)
 
-      if probs.dim() == 1:
-        probs = probs.unsqueeze(-1)
-      conf_indices = torch.max(distance + probs, dim=1).indices
-      gt = torch.tensor(testset.loc[testset['result_type']==0, 'ground_truth_output'].values)
-      correct = conf_indices[(testset.result_type==0).values].eq(gt).sum()
-      logger.log.info(f"Accuracy of hard clustering on {correct}/{gt.numel()}: {correct/gt.numel()}")
 
-      num_nans = sum(probs==-float("Inf"))
-      if num_nans != 0 :
-        logger.log.info(f"Warning : {num_nans} Nans in conditional probability")
-        probs[probs==-float("inf")] = -1e6
-      refined_confidence = confidence + probs.squeeze()
-      refined_confidence[refined_confidence==-float("Inf")] = -1e6
-      refined_confidence[torch.isnan(refined_confidence)] = -1e6
-
-      # Detect attacks for correctly classified samples (unnecessary for fgws, random_sample settings)
-      fpr_thres = args.fpr_threshold
-      adv_count = testset.loc[testset['result_type']==1].shape[0]
-      correct_idx = np.array(testset['result_type']!=-1)
-      correct_set = testset.loc[correct_idx]
-
-      logger.log.info("-----Results for Baseline OOD------")
-      roc, auc, _ = detect_attack(correct_set, confidence[correct_idx], conf_indices[correct_idx], fpr_thres,
-                               visualize=True, logger=logger, mode="Baseline")
-      logger.log.info("-----Results for Hierarchical OOD------")
-      roc, auc, tpr_at_fpr = detect_attack(correct_set, refined_confidence[correct_idx], conf_indices[correct_idx], fpr_thres,
-                               visualize=True, logger=logger, mode="Hierarchical")
-      logger.log.info("-----Results for Conditional Probability OOD------")
-      _, _, _ = detect_attack(correct_set, probs[correct_idx], conf_indices[correct_idx], fpr_thres,
-                               visualize=True, logger=logger, mode="conditional")
-      if tpr_at_fpr > best:
-        best = tpr_at_fpr
-        best_k = k
-        best_roc = roc
-        best_conf = refined_confidence
-
-  logger.log.info(f"Best : {best} at p={best_k}")
-  # Compute bootstrap scores
-  target = testset.result_type.values
-  scores = compute_bootstrap_score(best_conf, target, best_roc, fpr_thres)
-
-  logger.log.info("-----Bootstrapped Results-----")
-  for k, v in scores.items():
-    logger.log.info(f"{k}: {v:.4f}")
 
   """
   Inference Stage:

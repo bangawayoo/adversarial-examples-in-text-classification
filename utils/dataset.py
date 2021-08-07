@@ -65,7 +65,7 @@ def split_dataset(dataset, split='trainval', split_ratio=0.8):
     testset = dataset[range(num_samples)]
     return testset
 
-def read_testset_from_csv(filename, use_original=False, split_type='disjoint_subset', split_ratio=0.75, seed=0):
+def read_testset_from_csv(filename, use_original=False, split_type='random_sample', seed=0):
   def clean_text(t):
     t = t.replace("[", "")
     t = t.replace("]", "")
@@ -80,6 +80,9 @@ def read_testset_from_csv(filename, use_original=False, split_type='disjoint_sub
   assert split_type in ['fgws', 'random_sample', 'control_sample', 'control_success', 'attack_scenario'], "Check split type"
   if split_type=='random_sample':
     num_samples = df.shape[0]
+    num_adv = (df.result_type==1).sum()
+    split_ratio = (500/num_adv) # Ensure minimum of 500 adversarial samples are used if possible
+
     np.random.seed(seed)
     rand_idx =  np.arange(num_samples)
     np.random.shuffle(rand_idx)
@@ -97,6 +100,19 @@ def read_testset_from_csv(filename, use_original=False, split_type='disjoint_sub
     clean['result_type'] = 0
     clean = clean.rename(columns={"original_text": "text"})
     testset = pd.concat([adv, clean], axis=0)
+
+    if 'test.csv' in filename:
+      dtype = 'test'
+    elif 'val.csv' in filename:
+      dtype = 'val'
+    else:
+      dtype = ''
+
+    file_dir = os.path.dirname(filename)
+    file_dir = os.path.join(file_dir, 'random_sample')
+    if not os.path.isdir(file_dir):
+      os.mkdir(file_dir)
+    testset.to_csv(os.path.join(file_dir, f'{dtype}-{seed}.csv'))
 
   elif split_type in ['control_success', 'attack_scenario']:
     attack_success = df.loc[df.result_type == 1][['perturbed_text', 'result_type', 'ground_truth_output']]
@@ -128,6 +144,7 @@ def read_testset_from_csv(filename, use_original=False, split_type='disjoint_sub
   testset['text'] = testset['text'].apply(clean_text)
 
   return testset, df
+
 
 def read_testset_from_pkl(filename, model_wrapper, batch_size=128, logger=None):
   with open(filename, 'rb') as h :
@@ -210,18 +227,34 @@ def read_testset_from_pkl(filename, model_wrapper, batch_size=128, logger=None):
 
   return testset
 
-def split_csv_to_testval(filename, val_ratio, seed=0):
-  np.random.seed(seed)
-  df = pd.read_csv(filename)
-  num_samples = len(df)
-  indices = np.random.permutation(range(num_samples))
-  split_point = int(num_samples*val_ratio)
+def split_csv_to_testval(dir_name, val_ratio, seed=0):
+  """
+  Recursively search for *.csv and create csv with test and val set
+  """
+  dir_name = "attack-log/"
+  csv_files = []
+  for root, d_names, f_names in os.walk(dir_name):
+    found = [os.path.join(root,i) for i in f_names if (i.endswith(".csv")) and ('test' not in i and 'val' not in i)]
+    csv_files.extend(found)
 
-  dir = os.path.dirname(filename)
-  csv_name = os.path.basename(filename)[:-4]
-  valset = df.iloc[indices[:split_point]]
-  val_path = os.path.join(dir, csv_name+"-val.csv")
-  valset.to_csv(val_path)
-  testset = df.iloc[indices[split_point:]]
-  testpath = os.path.join(dir, csv_name+"-test.csv")
-  testset.to_csv(testpath)
+  print(f"Found {len(csv_files)} files:")
+  print(csv_files)
+  for file in csv_files:
+    np.random.seed(seed)
+    df = pd.read_csv(file)
+    num_samples = len(df)
+    indices = np.random.permutation(range(num_samples))
+    split_point = int(num_samples*val_ratio)
+
+    dir = os.path.dirname(file)
+    csv_name = os.path.basename(file)[:-4]
+    valset = df.iloc[indices[:split_point]]
+    val_path = os.path.join(dir, csv_name+"-val.csv")
+    valset.to_csv(val_path)
+    testset = df.iloc[indices[split_point:]]
+    testpath = os.path.join(dir, csv_name+"-test.csv")
+    testset.to_csv(testpath)
+
+
+if __name__ == "__main__":
+  split_csv_to_testval("attack-log/", val_ratio=0.3)
