@@ -1,14 +1,14 @@
 #!/bin/bash
-
+export CUDA_VISIBLE_DEVICES=0
 DATASET="imdb"
-RECIPE="pwws textfooler bae"
-MODEL="bert-base-uncased-${DATASET}"
+RECIPE="pwws textfooler"
+MODEL="roberta-base-${DATASET}"
 for recipe in $RECIPE
 do
   for model in $MODEL
   do
     LOG_FILE_NAME="${model}_${recipe}"
-    textattack attack --model $model --num-examples 10000 --log-to-csv "attack-log/$LOG_FILE_NAME.csv" --model-batch-size 64 --parallel 2>&1 | tee "attack-log/$LOG_FILE_NAME.txt"
+    textattack attack --model $model --num-examples 10000 --log-to-csv "attack-log/$LOG_FILE_NAME.csv" --model-batch-size 64 --recipe $recipe 2>&1 | tee "attack-log/$LOG_FILE_NAME.txt"
   done
 done
 

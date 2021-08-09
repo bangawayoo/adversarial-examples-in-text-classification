@@ -15,7 +15,9 @@ class GridSearch():
     self.data = None
     self.best_params = None
 
-    basedir = os.path.dirname(self.data_path)
+    # basedir = os.path.dirname(self.data_path)
+    # self.best_params_path = os.path.join(basedir, f"best_params-seed{self.seed}.pkl")
+    basedir = logger.log_path
     self.best_params_path = os.path.join(basedir, f"best_params-seed{self.seed}.pkl")
 
     self.data = self.get_data(val_data_path)
@@ -29,8 +31,8 @@ class GridSearch():
                                       batch_size=128, logger=self.logger )
     return testset
 
-  def tune(self, fpr_thres):
-    if os.path.exists(self.best_params_path):
+  def tune(self, fpr_thres, use_existing_params=False):
+    if os.path.exists(self.best_params_path) and use_existing_params:
       self.best_params = load_pkl(self.best_params_path)
       self.logger.log.info(f"Using Existing param in {self.best_params_path}")
       return self.best_params
@@ -42,7 +44,7 @@ class GridSearch():
     start_k, end_k, step_k = self.tune_params['topk']['start'], self.tune_params['topk']['end'], self.tune_params['topk']['step']
     for k in range(start_k, end_k, step_k):
       self.params['prob_param']['topk'] = k
-      self.logger.log.info(f"-----K={k}------")
+      self.logger.log.info(f"K={k}")
       test_features, probs = get_test_features(self.model_wrapper, batch_size=128, dataset=texts, params=self.params,
                                                logger=self.logger)
       confidence, conf_indices, distance = compute_dist(test_features, self.stats, distance_type="euclidean",
@@ -74,11 +76,11 @@ class GridSearch():
         best['roc'] = roc
         best_conf = refined_confidence
 
-      self.best_params = best
-      self.logger.log.info(f"Best : {best['tpr']} at p={best['k']}")
-      self.save_best_params()
+    self.best_params = best
+    self.logger.log.info(f"Best : {best['tpr']} at k={best['k']}")
+    self.save_best_params()
 
-      return self.best_params
+    return self.best_params
 
   def save_best_params(self):
     save_pkl(self.best_params, self.best_params_path)

@@ -1,8 +1,8 @@
-RECIPE="bae textfooler pwws tf-adj"
+RECIPE="random prioritized genetic pwws"
 
 for recipe in $RECIPE
 do
-  python main.py --test_adv attack-log/imdb/roberta/${recipe}/roberta-base-imdb_${recipe}-test.csv \
-   --val_adv attack-log/imdb/roberta/${recipe}/roberta-base-imdb_${recipe}-val.csv \
+  python main.py --test_adv attack-from-fgws/imdb/${recipe}/${recipe}-test.pkl \
+   --val_adv attack-from-fgws/imdb/${recipe}/${recipe}-val.pkl \
    --attack_type $recipe
 done

@@ -10,21 +10,25 @@ parser = argparse.ArgumentParser(description="Detect and defense attacked sample
 parser.add_argument("--dataset", default="imdb", type=str,
                     choices=["dbpedia14", "ag_news", "imdb", "yelp", "mnli", "sst2"],
                     help="classification dataset to use")
-parser.add_argument("--preprocess", default="standard", type=str,
+parser.add_argument("--preprocess", default="fgws", type=str,
                     choices=["standard", "fgws"])
-parser.add_argument("--target_model", default="textattack/roberta-base-imdb", type=str, #textattack/roberta-base-SST-2
+parser.add_argument("--target_model", default="fgws_ckpt/roberta-base-imdb-fgws.pth", type=str, #textattack/roberta-base-SST-2
                     help="type of model (textattack pretrained model, path to ckpt)")
-parser.add_argument("--test_adv", default="attack-log/imdb/roberta/tf-adj/roberta-base-imdb_tf-adj-test.csv", type=str,
+parser.add_argument("--test_adv", default="attack-from-fgws/imdb/pwws/pwws-test.pkl", type=str,
                     help="perturbed texts files with extension csv or pkl")
-parser.add_argument("--val_adv", default="attack-log/imdb/roberta/tf-adj/roberta-base-imdb_tf-adj-val.csv", type=str,
+parser.add_argument("--val_adv", default="attack-from-fgws/imdb/pwws/pwws-val.pkl", type=str,
                     help="perturbed texts files with extension csv or pkl")
-parser.add_argument("--attack_type", default='tf-adj', type=str,
+parser.add_argument("--attack_type", default='pwws', type=str,
                     help="attack type for logging")
 
-parser.add_argument("--fpr_threshold", default=0.05)
+parser.add_argument("--fpr_threshold", default=0.093)
+parser.add_argument("--compute_bootstrap", default=True, action="store_true")
 # parser.add_argument("--split_ratio", default=1.0)
 
-parser.add_argument("--gpu", default='1', type=str)
+parser.add_argument("--k_tune_range", nargs="+", default="0 200 5",
+                    help="Three int values meaning <start k> <end k> <step>")
+
+parser.add_argument("--gpu", default='0', type=str)
 parser.add_argument("--mnli_option", default="matched", type=str,
                     choices=["matched", "mismatched"],
                     help="use matched or mismatched test set for MNLI")
@@ -48,8 +52,6 @@ import torch
 from transformers import AutoConfig, AutoTokenizer, AutoModelForSequenceClassification
 
 #List of hyper-parameters
-REFINE_TOP_K=6
-ADV_RATIO=None
 LAYER = -1
 
 model_type = args.target_model.replace("/","-")
@@ -72,19 +74,19 @@ if __name__ == "__main__":
   train_features = get_train_features(model_wrapper, args, batch_size=512, dataset=trainset, text_key=text_key, layer=LAYER)
   train_stats = get_stats(train_features, use_shared_cov=True)
 
-  tune_params = {'topk': {'start':0, 'end':200, 'step':5}}
+  k_s = list(map(lambda x: int(x), args.k_tune_range.split()))
+  tune_params = {'topk': {'start':k_s[0], 'end':k_s[1], 'step':k_s[2]}}
   params = {
-    "model_param": {'type': 'attention', 'normalization': 'softmax', 'tempearture': 1.0, 'attention_type': 'key'},
+    "model_param": {'type': 'cosine_sim', 'normalization': 'softmax', 'temperature': 1.0,
+                    'attention_type': 'query', 'exclude_cls_token':True},
     'layer_param': {'cls_layer': -1, 'num_layer': 1},
     'prob_param': {'choose_type': 'topk', 'topk': 0, 'sum_heads': True, 'p': 0}}
   tuner = GridSearch(tune_params, model_wrapper, args.val_adv, train_stats, logger, params, seed=0)
-  pdb.set_trace()
-  tuner.tune(fpr_thres=args.fpr_threshold)
+  tuner.tune(fpr_thres=args.fpr_threshold, use_existing_params=False)
   roc, auc, tpr_at_fpr, conf, testset = tuner.test(args.test_adv, args.fpr_threshold)
 
 
-  BOOTSTRAP = False
-  if BOOTSTRAP:
+  if args.compute_bootstrap:
     # Compute bootstrap scores
     target = testset.result_type.values
     scores = compute_bootstrap_score(conf, target, roc, args.fpr_threshold)

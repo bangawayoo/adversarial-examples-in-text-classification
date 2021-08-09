@@ -115,12 +115,13 @@ def get_test_features(model_wrapper, batch_size, dataset, params, logger=None):
         feat = output.hidden_states[layer][:, 0, :].cpu()  # output.hidden_states : (Batch_size, sequence_length, hidden_dim)
         features.append(feat.cpu())
         log_prob_sum = torch.zeros(len(examples)).to(model_wrapper.model.device)
+        start_seq = 1 if params['model_param']['exclude_cls_token'] else 0
         for l in range(1, params['layer_param']['num_layer']+1):
-          if params['model_param']['type'] == "cosine_sim": # 10~20 seems fine
+          if params['model_param']['type'] == "cosine_sim":
             query = output.hidden_states[layer-l+1][:, 0, :].to(model_wrapper.model.device) #(batch_size, hidden_dim)
-            word_vectors = output.hidden_states[layer-l] #(batch_size, seq  , hidden_dim)
+            word_vectors = output.hidden_states[layer-l][:, start_seq:, :]#(batch_size, seq  , hidden_dim)
             word_vectors = word_vectors / torch.norm(word_vectors, p=2, dim=-1, keepdim=True)
-            word_vectors = word_vectors * att_mask[:,:,None].to(model_wrapper.model.device)
+            word_vectors = word_vectors * att_mask[:,start_seq:,None].to(model_wrapper.model.device)
             query = query / torch.norm(query, p=2, dim=-1, keepdim=True)
             inner_product = torch.einsum("bh, bsh -> bs", query, word_vectors)
             if params['model_param']['normalization'] == 'l1':
@@ -129,15 +130,18 @@ def get_test_features(model_wrapper, batch_size, dataset, params, logger=None):
             elif params['model_param']['normalization'] == 'softmax':
               T = params['model_param']['temperature']
               inner_product = torch.exp(inner_product/T) / torch.exp(inner_product/T).sum(-1, keepdims=True)
+            if inner_product.shape[-1] < params['prob_param']['topk']:
+              params['prob_param']['topk'] = inner_product.shape[-1]
             topk_log_prob = torch.log(torch.topk(inner_product, params['prob_param']['topk'], dim=1).values)
             log_prob_layer = torch.sum(topk_log_prob,dim=1)
             log_prob_sum += log_prob_layer
 
           elif params['model_param']['type'] == "attention" : #50-150 seems fine for use_key, 5~10 for use_query
+            start_seq = 1 if params['model_param']['exclude_cls_token'] else 0
             if params['model_param']['attention_type'] == "key":
-              conditional_prob = output.attentions[layer-l+1][:,:,:,0] #attention score using cls token as key. Then, sum across heads
+              conditional_prob = output.attentions[layer-l+1][:,:,start_seq:,0] #attention score using cls token as key. Then, sum across heads
             elif params['model_param']['attention_type'] == "query" :
-              conditional_prob = output.attentions[layer-l+1][:,:,0,:] #attention score using cls token as query. Then, sum across heads
+              conditional_prob = output.attentions[layer-l+1][:,:,0,start_seq:] #attention score using cls token as query. Then, sum across heads
 
             if params['prob_param']['sum_heads'] :
               conditional_prob = conditional_prob.sum(1) # Sum across heads
