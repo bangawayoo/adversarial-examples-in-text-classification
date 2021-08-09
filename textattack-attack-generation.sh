@@ -1,8 +1,8 @@
 #!/bin/bash
 export CUDA_VISIBLE_DEVICES=0
 DATASET="imdb"
-#RECIPE="pwws textfooler bae"
-RECIPE="pwws"
+RECIPE="pwws textfooler"
+#RECIPE="pwws"
 MODEL="roberta-base-${DATASET}"
 for recipe in $RECIPE
 do
