@@ -81,7 +81,13 @@ def read_testset_from_csv(filename, use_original=False, split_type='random_sampl
   if split_type=='random_sample':
     num_samples = df.shape[0]
     num_adv = (df.result_type==1).sum()
-    split_ratio = (500/num_adv) # Ensure minimum of 500 adversarial samples are used if possible
+
+    for num_sample in range(500,0,-100):
+      split_ratio = (num_sample/num_adv) # Ensure minimum of 500 adversarial samples are used if possible
+      if split_ratio < 1 :
+        break
+    if split_ratio >= 1:
+      raise Exception(f"Too small data for sampling enough adverserial samples. Total: {num_sample}, Adv.: {num_adv}")
 
     np.random.seed(seed)
     rand_idx =  np.arange(num_samples)
@@ -231,7 +237,6 @@ def split_csv_to_testval(dir_name, val_ratio, seed=0):
   """
   Recursively search for *.csv and create csv with test and val set
   """
-  dir_name = "attack-log/"
   csv_files = []
   for root, d_names, f_names in os.walk(dir_name):
     found = [os.path.join(root,i) for i in f_names if (i.endswith(".csv")) and ('test' not in i and 'val' not in i)]
@@ -249,12 +254,13 @@ def split_csv_to_testval(dir_name, val_ratio, seed=0):
     dir = os.path.dirname(file)
     csv_name = os.path.basename(file)[:-4]
     valset = df.iloc[indices[:split_point]]
-    val_path = os.path.join(dir, csv_name+"-val.csv")
+    val_path = os.path.join(dir, "val.csv")
     valset.to_csv(val_path)
     testset = df.iloc[indices[split_point:]]
-    testpath = os.path.join(dir, csv_name+"-test.csv")
+    testpath = os.path.join(dir, "test.csv")
     testset.to_csv(testpath)
 
 
 if __name__ == "__main__":
-  split_csv_to_testval("attack-log/", val_ratio=0.3)
+  seed=0
+  split_csv_to_testval("attack-log/imdb/roberta/tf-adj", val_ratio=0.3, seed=seed)

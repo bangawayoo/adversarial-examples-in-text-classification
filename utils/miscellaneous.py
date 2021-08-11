@@ -3,9 +3,12 @@ import random
 
 from sklearn.metrics import roc_auc_score
 import numpy as np
-
+import os
 
 def save_pkl(object, path):
+  dirname = os.path.dirname(path)
+  if not os.path.exists(dirname):
+    os.mkdir(dirname)
   with open(path, "wb") as handle:
     pickle.dump(object, handle)
 

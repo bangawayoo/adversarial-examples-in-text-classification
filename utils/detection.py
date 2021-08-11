@@ -11,7 +11,7 @@ import torch.nn as nn
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.metrics import roc_curve, precision_recall_curve, precision_recall_fscore_support
+from sklearn.metrics import roc_curve, precision_recall_curve, precision_recall_fscore_support, auc
 
 from utils.miscellaneous import save_pkl, load_pkl
 
@@ -204,7 +204,8 @@ def compute_dist(test_features, train_stats, distance_type='mahan', use_marginal
   return confidence, conf_indices, output
 
 
-def detect_attack(testset, confidence, conf_indices, fpr_thres=0.05, visualize=False, logger=None, mode=None):
+def detect_attack(testset, confidence, conf_indices, fpr_thres=0.05, visualize=False, logger=None, mode=None,
+                  log_metric=False):
   """
   Detect attack for correct samples only to compute detection metric (TPR, recall, precision)
   """
@@ -224,8 +225,10 @@ def detect_attack(testset, confidence, conf_indices, fpr_thres=0.05, visualize=F
   pred = np.zeros_like(conf)
   pred[-conf>=roc_cutoff] = 1
   prec, rec, f1, _ = precision_recall_fscore_support(target, pred, average='binary')
+  auc_value = auc(fpr, tpr)
   logger.log.info(f"TPR at FPR={fpr_thres} : {tpr_at_fpr:.3f}")
   logger.log.info(f"F1 : {f1:.3f}, prec: {prec:.3f}, recall: {rec:.3f}")
+  logger.log.info(f"AUC: {auc_value:.3f}")
   if visualize:
     # ax = sns.boxplot(x='result_type', y='negative_conf', data=testset)
     # plt.show()
@@ -240,6 +243,9 @@ def detect_attack(testset, confidence, conf_indices, fpr_thres=0.05, visualize=F
     ax.legend()
     fig.savefig(os.path.join(logger.log_path, f"{mode}-hist.png"))
     plt.close()
+
+  if log_metric:
+    logger.log_metric(tpr_at_fpr, fpr_thres, f1, auc_value)
 
   metric1 = (fpr, tpr, thres1)
   metric2 = (precision, recall, thres2)

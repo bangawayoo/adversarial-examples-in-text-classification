@@ -2,7 +2,7 @@ from utils.detection import *
 from utils.dataset import *
 from utils.miscellaneous import *
 
-class GridSearch():
+class Detector():
   def __init__(self, tune_params, model_wrapper, val_data_path, train_stats,
                logger, params, seed=0):
     self.tune_params = tune_params
@@ -11,27 +11,29 @@ class GridSearch():
     self.logger = logger
     self.stats = train_stats
     self.data_path = val_data_path
-    self.seed = 0
+    self.seed = seed
     self.data = None
     self.best_params = None
 
-    # basedir = os.path.dirname(self.data_path)
-    # self.best_params_path = os.path.join(basedir, f"best_params-seed{self.seed}.pkl")
-    basedir = logger.log_path
+    basedir = os.path.join(logger.log_path, 'params')
     self.best_params_path = os.path.join(basedir, f"best_params-seed{self.seed}.pkl")
-
     self.data = self.get_data(val_data_path)
 
   def get_data(self, val_data_path):
     if val_data_path.endswith(".csv"):
-      testset, _ = read_testset_from_csv(val_data_path, use_original=False,
+      dataset, _ = read_testset_from_csv(val_data_path, use_original=False,
                                                    split_type='random_sample', seed=self.seed)
     elif val_data_path.endswith(".pkl"):
-      testset = read_testset_from_pkl(val_data_path, self.model_wrapper,
-                                      batch_size=128, logger=self.logger )
-    return testset
+      dataset = read_testset_from_pkl(val_data_path, self.model_wrapper,
+                                      batch_size=128, logger=self.logger)
 
-  def tune(self, fpr_thres, use_existing_params=False):
+    adv_count = dataset.result_type.value_counts()[1]
+    total = len(dataset)
+    self.logger.log.info(f"Percentage of adv. samples :{adv_count}/{total} = {adv_count/total:3f}")
+
+    return dataset
+
+  def grid_search(self, fpr_thres, use_existing_params=False):
     if os.path.exists(self.best_params_path) and use_existing_params:
       self.best_params = load_pkl(self.best_params_path)
       self.logger.log.info(f"Using Existing param in {self.best_params_path}")
@@ -112,7 +114,7 @@ class GridSearch():
     self.logger.log.info("-----Results for Hierarchical OOD------")
     roc, auc, tpr_at_fpr = detect_attack(testset, refined_confidence, conf_indices,
                                          fpr_thres,
-                                         visualize=True, logger=self.logger, mode="Hierarchical")
+                                         visualize=True, logger=self.logger, mode="Hierarchical", log_metric=True)
     self.logger.log.info("-----Results for Conditional Probability OOD------")
     _, _, _ = detect_attack(testset, probs, conf_indices, fpr_thres,
                             visualize=True, logger=self.logger, mode="conditional")
