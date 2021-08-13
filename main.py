@@ -14,24 +14,24 @@ parser.add_argument("--preprocess", default="standard", type=str,
                     choices=["standard", "fgws"])
 parser.add_argument("--target_model", default="textattack/roberta-base-imdb", type=str, #textattack/roberta-base-SST-2
                     help="type of model (textattack pretrained model, path to ckpt)")
-parser.add_argument("--test_adv", default="attack-log/imdb/roberta/tf-adj/test.csv", type=str,
+parser.add_argument("--test_adv", default="attack-log/imdb/roberta/bae/test.csv", type=str,
                     help="perturbed texts files with extension csv or pkl")
-parser.add_argument("--val_adv", default="attack-log/imdb/roberta/tf-adj/val.csv", type=str,
+parser.add_argument("--val_adv", default="attack-log/imdb/roberta/bae/val.csv", type=str,
                     help="perturbed texts files with extension csv or pkl")
-parser.add_argument("--attack_type", default='tf-adj', type=str,
+parser.add_argument("--attack_type", default='bae', type=str,
                     help="attack type for logging")
 
 parser.add_argument("--fpr_threshold", default=0.093)
 parser.add_argument("--compute_bootstrap", default=False, action="store_true")
 # parser.add_argument("--split_ratio", default=1.0)
 
-parser.add_argument("--k_tune_range", nargs="+", default="0 200 5",
+parser.add_argument("--k_tune_range", nargs="+", default="0 255 5",
                     help="Three int values meaning <start k> <end k> <step>")
 parser.add_argument("--use_params", default=False, action="store_true",
                     help="Whether to use the found best_params.pkl if it exists")
 
 parser.add_argument("--gpu", default='1', type=str)
-parser.add_argument("--seed", default=0, type=int)
+parser.add_argument("--seed", default=2, type=int)
 parser.add_argument("--mnli_option", default="matched", type=str,
                     choices=["matched", "mismatched"],
                     help="use matched or mismatched test set for MNLI")
@@ -50,7 +50,6 @@ from Detector import Detector
 
 #List of hyper-parameters
 LAYER = -1
-
 model_type = args.target_model.replace("/","-")
 assert args.attack_type in args.test_adv, f"Attack Type Error: Check if {args.test_adv} is based on {args.attack_type} method"
 args.log_path = f"runs/{args.dataset}/{model_type}/{args.attack_type}"
@@ -59,6 +58,7 @@ if __name__ == "__main__":
   if not os.path.isdir(args.log_path):
     os.makedirs(args.log_path)
   logger = Logger(args.log_path, args.seed)
+  logger.log.info("Args: "+str(args.__dict__))
 
   model_wrapper = BertWrapper(args, logger)
   model = model_wrapper.model

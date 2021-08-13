@@ -1,8 +1,14 @@
-RECIPE="random prioritized genetic pwws"
+RECIPE="textfooler tf-adj bae"
 
-for recipe in $RECIPE
+for seed in $(seq 0 2)
 do
-  python main.py --test_adv attack-from-fgws/imdb/${recipe}/${recipe}-test.pkl \
-   --val_adv attack-from-fgws/imdb/${recipe}/${recipe}-val.pkl \
-   --attack_type $recipe
+  for recipe in $RECIPE
+  do
+    python main.py --dataset imdb\
+    --test_adv attack-log/imdb/roberta/$recipe/test.csv\
+    --val_dav attack-log/imdb/roberta/$recipe/val.csv\
+    --attack_type $recipe\
+    --seed $seed
+  done
 done
+

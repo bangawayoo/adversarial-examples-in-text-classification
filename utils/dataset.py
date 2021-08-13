@@ -263,4 +263,4 @@ def split_csv_to_testval(dir_name, val_ratio, seed=0):
 
 if __name__ == "__main__":
   seed=0
-  split_csv_to_testval("attack-log/imdb/roberta/tf-adj", val_ratio=0.3, seed=seed)
+  split_csv_to_testval("attack-log/imdb/", val_ratio=0.3, seed=seed)
