@@ -1,6 +1,6 @@
 #!/bin/bash
 export CUDA_VISIBLE_DEVICES=1
-DATASET="SST-2"
+DATASET="sst2"
 RECIPE="textfooler"
 MODEL="roberta-base-${DATASET}"
 for recipe in $RECIPE

@@ -21,7 +21,7 @@ parser.add_argument("--val_adv", default="attack-log/imdb/roberta/bae/val.csv", 
 parser.add_argument("--attack_type", default='bae', type=str,
                     help="attack type for logging")
 
-parser.add_argument("--fpr_threshold", default=0.093)
+parser.add_argument("--fpr_threshold", default=0.1)
 parser.add_argument("--compute_bootstrap", default=False, action="store_true")
 # parser.add_argument("--split_ratio", default=1.0)
 
