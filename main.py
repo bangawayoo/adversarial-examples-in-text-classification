@@ -80,7 +80,7 @@ if __name__ == "__main__":
   tune_params = {'topk': {'start':k_s[0], 'end':k_s[1], 'step':k_s[2]}}
   params = {
     "model_param": {'type': 'attention', 'normalization': 'softmax', 'temperature': 1.0,
-                    'attention_type': 'key', 'exclude_cls_token':True},
+                    'attention_type': 'query', 'exclude_cls_token':True},
     'layer_param': {'cls_layer': -1, 'num_layer': 1},
     'prob_param': {'choose_type': 'topk', 'topk': 0, 'sum_heads': True, 'p': 0.0}}
   detector = Detector(tune_params, model_wrapper, args.val_adv, train_stats, logger, params, seed=args.seed)

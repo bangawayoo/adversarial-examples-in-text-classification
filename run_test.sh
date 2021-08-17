@@ -1,7 +1,7 @@
 DATASET="imdb"
 MODEL="roberta"
 RECIPE="pwws textfooler tf-adj bae"
-EXP_NAME="attention-key-exclude"
+EXP_NAME="attention-query-exclude"
 
 python utils/dataset.py $DATASET
 
