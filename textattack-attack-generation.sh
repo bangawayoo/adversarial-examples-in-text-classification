@@ -1,6 +1,6 @@
 #!/bin/bash
 export CUDA_VISIBLE_DEVICES=1
-DATASET="ag-news"
+DATASET="sst2"
 RECIPE="textfooler"
 MODEL="roberta-base-${DATASET}"
 for recipe in $RECIPE
@@ -8,8 +8,8 @@ do
   for model in $MODEL
   do
     LOG_FILE_NAME="${model}_${recipe}"
-    textattack attack --model $model --num-examples 10000 --log-to-csv "attack-log/ag-news/$LOG_FILE_NAME.csv" --model-batch-size 128 --recipe $recipe \
-     --num-workers-per-device 16 --checkpoint-interval 1000 --checkpoint-dir "attack-log/checkpoint" \
+    textattack attack --model $model --num-examples 10000 --log-to-csv "attack-log/$DATASET/$LOG_FILE_NAME.csv" --model-batch-size 128 --recipe $recipe \
+     --num-workers-per-device 16 --dataset-split test\
      2>&1 | tee "attack-log/ag-news/$LOG_FILE_NAME.txt"
   done
 done

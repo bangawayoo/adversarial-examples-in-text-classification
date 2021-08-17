@@ -20,12 +20,14 @@ parser.add_argument("--val_adv", default="attack-log/imdb/roberta/bae/val.csv", 
                     help="perturbed texts files with extension csv or pkl")
 parser.add_argument("--attack_type", default='bae', type=str,
                     help="attack type for logging")
+parser.add_argument("--exp_name", default='include_cls', type=str,
+                    help="Name for logging")
 
 parser.add_argument("--fpr_threshold", default=0.1)
 parser.add_argument("--compute_bootstrap", default=False, action="store_true")
 # parser.add_argument("--split_ratio", default=1.0)
 
-parser.add_argument("--k_tune_range", nargs="+", default="0 255 5",
+parser.add_argument("--k_tune_range", nargs="+", default="0 260 5",
                     help="Three int values meaning <start k> <end k> <step>")
 parser.add_argument("--use_params", default=False, action="store_true",
                     help="Whether to use the found best_params.pkl if it exists")
@@ -52,7 +54,10 @@ from Detector import Detector
 LAYER = -1
 model_type = args.target_model.replace("/","-")
 assert args.attack_type in args.test_adv, f"Attack Type Error: Check if {args.test_adv} is based on {args.attack_type} method"
-args.log_path = f"runs/{args.dataset}/{model_type}/{args.attack_type}"
+if args.exp_name:
+  args.log_path = f"runs/{args.dataset}/{args.exp_name}/{model_type}/{args.attack_type}"
+else:
+  args.log_path = f"runs/{args.dataset}/{model_type}/{args.attack_type}"
 
 if __name__ == "__main__":
   if not os.path.isdir(args.log_path):
@@ -74,13 +79,14 @@ if __name__ == "__main__":
   k_s = list(map(lambda x: int(x), args.k_tune_range.split()))
   tune_params = {'topk': {'start':k_s[0], 'end':k_s[1], 'step':k_s[2]}}
   params = {
-    "model_param": {'type': 'cosine_sim', 'normalization': 'softmax', 'temperature': 1.0,
-                    'attention_type': 'query', 'exclude_cls_token':True},
+    "model_param": {'type': 'attention', 'normalization': 'softmax', 'temperature': 1.0,
+                    'attention_type': 'key', 'exclude_cls_token':True},
     'layer_param': {'cls_layer': -1, 'num_layer': 1},
-    'prob_param': {'choose_type': 'topk', 'topk': 0, 'sum_heads': True, 'p': 0}}
+    'prob_param': {'choose_type': 'topk', 'topk': 0, 'sum_heads': True, 'p': 0.0}}
   detector = Detector(tune_params, model_wrapper, args.val_adv, train_stats, logger, params, seed=args.seed)
   detector.grid_search(fpr_thres=args.fpr_threshold, use_existing_params=args.use_params)
-  roc, auc, tpr_at_fpr, conf, testset = detector.test(args.test_adv, args.fpr_threshold)
+  roc, auc, tpr_at_fpr, naive_tpr, conf, testset = detector.test(args.test_adv, args.fpr_threshold)
+  best_k = detector.best_params['k']
   logger.save_metric()
 
   if args.compute_bootstrap:

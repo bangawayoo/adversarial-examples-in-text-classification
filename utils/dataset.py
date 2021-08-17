@@ -4,6 +4,8 @@
 # This source code is licensed under the CC-by-NC license found in the
 # LICENSE file in the root directory of this source tree.
 #
+import glob
+
 import os
 import pickle
 import re
@@ -13,8 +15,6 @@ from datasets import load_dataset
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-
-from utils.preprocess import *
 
 
 def load_data(args):
@@ -65,7 +65,7 @@ def split_dataset(dataset, split='trainval', split_ratio=0.8):
     testset = dataset[range(num_samples)]
     return testset
 
-def read_testset_from_csv(filename, use_original=False, split_type='random_sample', seed=0):
+def read_testset_from_csv(filename, use_original=False, split_type='random_sample', seed=0, num_max_adv=500):
   def clean_text(t):
     t = t.replace("[", "")
     t = t.replace("]", "")
@@ -81,13 +81,13 @@ def read_testset_from_csv(filename, use_original=False, split_type='random_sampl
   if split_type=='random_sample':
     num_samples = df.shape[0]
     num_adv = (df.result_type==1).sum()
+    split_ratio = 1
 
-    for num_sample in range(500,0,-100):
-      split_ratio = (num_sample/num_adv) # Ensure minimum of 500 adversarial samples are used if possible
-      if split_ratio < 1 :
-        break
+    while split_ratio >= 1 :
+      split_ratio = num_max_adv / num_adv
+      num_max_adv -= 100
     if split_ratio >= 1:
-      raise Exception(f"Too small data for sampling enough adverserial samples. Total: {num_sample}, Adv.: {num_adv}")
+      raise Exception(f"Dataset is too small to sample enough adverserial samples. Total: {num_samples}, Adv.: {num_adv}")
 
     np.random.seed(seed)
     rand_idx =  np.arange(num_samples)
@@ -101,9 +101,9 @@ def read_testset_from_csv(filename, use_original=False, split_type='random_sampl
     num_adv_samples = adv.shape[0]
 
     other_split_idx = rand_idx[split_point:split_point+num_adv_samples]
-    other_split = df.iloc[other_split_idx]
+    other_split = df.iloc[other_split_idx].copy()
     clean = other_split # Use correct and incorrect samples
-    clean['result_type'] = 0
+    clean.loc[:,'result_type'] = 0
     clean = clean.rename(columns={"original_text": "text"})
     testset = pd.concat([adv, clean], axis=0)
 
@@ -235,15 +235,33 @@ def read_testset_from_pkl(filename, model_wrapper, batch_size=128, logger=None):
 
 def split_csv_to_testval(dir_name, val_ratio, seed=0):
   """
-  Recursively search for *.csv and create csv with test and val set
+  Recursively search for *.csv and create test and val set
   """
+  # for root, d_names, f_names in os.walk(dir_name):
+  #   found = [os.path.join(root,i) for i in f_names if (i.endswith(".csv")) and ('test' not in i and 'val' not in i)]
+  #   csv_files.extend(found)
+  csv_dir = []
   csv_files = []
-  for root, d_names, f_names in os.walk(dir_name):
-    found = [os.path.join(root,i) for i in f_names if (i.endswith(".csv")) and ('test' not in i and 'val' not in i)]
-    csv_files.extend(found)
 
-  print(f"Found {len(csv_files)} files:")
+  for root, d_names, f_names in os.walk(dir_name):
+    flag = False
+    for file in f_names:
+      if "test" in file or "val" in file:
+        flag = False
+        break
+      if file.endswith(".csv"):
+        flag = True
+    if flag:
+      csv_dir.append(root)
+
+  for dir_ in csv_dir:
+    dir_ = os.path.join(dir_, "*.csv")
+    files = glob.glob(dir_)
+    csv_files.extend(files)
+
+  print(f"Splitting {len(csv_files)} files in {dir_name}:")
   print(csv_files)
+
   for file in csv_files:
     np.random.seed(seed)
     df = pd.read_csv(file)
@@ -260,7 +278,9 @@ def split_csv_to_testval(dir_name, val_ratio, seed=0):
     testpath = os.path.join(dir, "test.csv")
     testset.to_csv(testpath)
 
+import sys
 
 if __name__ == "__main__":
   seed=0
-  split_csv_to_testval("attack-log/imdb/", val_ratio=0.3, seed=seed)
+  path = os.path.join("attack-log", sys.argv[-1])
+  split_csv_to_testval(path, val_ratio=0.3, seed=seed)

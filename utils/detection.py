@@ -245,7 +245,8 @@ def detect_attack(testset, confidence, conf_indices, fpr_thres=0.05, visualize=F
     plt.close()
 
   if log_metric:
-    logger.log_metric(tpr_at_fpr, fpr_thres, f1, auc_value)
+    metrics = {"tpr":tpr_at_fpr, "fpr":fpr_thres, "f1":f1, "auc":auc_value}
+    logger.log_metric(metrics)
 
   metric1 = (fpr, tpr, thres1)
   metric2 = (precision, recall, thres2)

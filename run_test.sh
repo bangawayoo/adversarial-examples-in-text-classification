@@ -1,14 +1,20 @@
-RECIPE="textfooler tf-adj bae"
+DATASET="imdb"
+MODEL="roberta"
+RECIPE="pwws textfooler tf-adj bae"
+EXP_NAME="attention-key-exclude"
 
-for seed in $(seq 0 2)
+python utils/dataset.py $DATASET
+
+for recipe in $RECIPE
 do
-  for recipe in $RECIPE
+  for seed in $(seq 1 2)
   do
-    python main.py --dataset imdb\
-    --test_adv attack-log/imdb/roberta/$recipe/test.csv\
-    --val_adv attack-log/imdb/roberta/$recipe/val.csv\
+    python main.py --dataset $DATASET\
+    --test_adv attack-log/$DATASET/$MODEL/$recipe/test.csv\
+    --val_adv attack-log/$DATASET/$MODEL/$recipe/val.csv\
     --attack_type $recipe\
-    --seed $seed
+    --seed $seed\
+    --exp_name $EXP_NAME
   done
 done
 

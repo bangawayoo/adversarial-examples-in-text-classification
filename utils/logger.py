@@ -11,7 +11,7 @@ class Logger:
     def __init__(self, log_path, seed):
         for handler in logging.root.handlers[:]:
             logging.root.removeHandler(handler)
-        logging.basicConfig(filename=f"{log_path}/out.log", level=logging.INFO, filemode="w")
+        logging.basicConfig(filename=f"{log_path}/out.log", level=logging.INFO, filemode="a")
         streamHandler = logging.StreamHandler(sys.stdout)
         self.log = logging.getLogger('log')
         self.log.addHandler(streamHandler)
@@ -19,12 +19,12 @@ class Logger:
         self.log_path = log_path
         self.seed=seed
         self.metric = {}
-        self.metric_names = ['tpr', 'fpr', 'f1', 'auc']
+        self.metric_names = ['tpr', 'fpr', 'f1', 'auc', 'topk', 'naive_tpr']
 
-    def log_metric(self, *args):
-        assert len(args) == 4, "Check if four metrics were given"
-        for v, k in zip(args, self.metric_names):
-            self.metric[k] = v
+    def log_metric(self, metric_dict):
+        for key, value in metric_dict.items():
+            assert key in self.metric_names, f"Trying to log {key}: Not in {self.metric_names} "
+            self.metric[key] = value
 
     def save_metric(self):
         csv_path = os.path.join(self.log_path, "results.csv")

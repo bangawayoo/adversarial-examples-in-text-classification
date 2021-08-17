@@ -17,12 +17,14 @@ class Detector():
 
     basedir = os.path.join(logger.log_path, 'params')
     self.best_params_path = os.path.join(basedir, f"best_params-seed{self.seed}.pkl")
-    self.data = self.get_data(val_data_path)
+    self.data = self.get_data(val_data_path, num_max_adv=1000)
 
-  def get_data(self, val_data_path):
+  def get_data(self, val_data_path, num_max_adv=500):
+    # num_max_adv : number of maximum adverserial samples to be tested
+    # If not possible, this is decremented by 100
     if val_data_path.endswith(".csv"):
       dataset, _ = read_testset_from_csv(val_data_path, use_original=False,
-                                                   split_type='random_sample', seed=self.seed)
+                                                   split_type='random_sample', seed=self.seed, num_max_adv=num_max_adv)
     elif val_data_path.endswith(".pkl"):
       dataset = read_testset_from_pkl(val_data_path, self.model_wrapper,
                                       batch_size=128, logger=self.logger)
@@ -88,7 +90,7 @@ class Detector():
     save_pkl(self.best_params, self.best_params_path)
 
   def test(self, test_data_path, fpr_thres):
-    testset = self.get_data(test_data_path)
+    testset = self.get_data(test_data_path, num_max_adv=2000)
     texts = testset['text'].tolist()
     assert self.best_params is not None, "Check if params is tuned"
 
@@ -109,7 +111,7 @@ class Detector():
     refined_confidence[torch.isnan(refined_confidence)] = -1e6
 
     self.logger.log.info("-----Results for Baseline OOD------")
-    roc, auc, _ = detect_attack(testset, confidence, conf_indices, fpr_thres,
+    roc, auc, naive_tpr = detect_attack(testset, confidence, conf_indices, fpr_thres,
                                 visualize=True, logger=self.logger, mode="Baseline")
     self.logger.log.info("-----Results for Hierarchical OOD------")
     roc, auc, tpr_at_fpr = detect_attack(testset, refined_confidence, conf_indices,
@@ -119,4 +121,6 @@ class Detector():
     _, _, _ = detect_attack(testset, probs, conf_indices, fpr_thres,
                             visualize=True, logger=self.logger, mode="conditional")
 
-    return roc, auc, tpr_at_fpr, refined_confidence, testset
+    self.logger.log_metric({"topk":self.best_params['k'], "naive_tpr":naive_tpr})
+
+    return roc, auc, tpr_at_fpr, naive_tpr, refined_confidence, testset
