@@ -2,7 +2,7 @@
 export CUDA_VISIBLE_DEVICES=1
 DATASET="sst2"
 RECIPE="textfooler"
-MODEL="roberta-base-${DATASET}"
+MODEL="roberta-base-${DATASET} bert-base-uncased-${DATASET}"
 for recipe in $RECIPE
 do
   for model in $MODEL
