@@ -8,8 +8,8 @@ do
   for model in $MODEL
   do
     LOG_FILE_NAME="${model}_${recipe}"
-    textattack attack --model $model --num-examples 1821 --log-to-csv "attack-log/$DATASET/$LOG_FILE_NAME.csv" --model-batch-size 128 --recipe $recipe \
-     --num-workers-per-device 16 --dataset-from-file sst2_dataset.py\
+    textattack attack --model $model --num-examples 872 --log-to-csv "attack-log/$DATASET/$LOG_FILE_NAME.csv" --model-batch-size 128 --recipe $recipe \
+     --num-workers-per-device 16 --dataset-from-huggingface glue^sst2\
      2>&1 | tee "attack-log/$DATASET/$LOG_FILE_NAME.txt"
   done
 done
