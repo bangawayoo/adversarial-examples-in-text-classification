@@ -38,4 +38,16 @@ class Logger:
             data.insert(0, self.seed)
             wr.writerow(data)
 
+    def save_custom_metric(self, filename, metric, header):
+        csv_path = os.path.join(self.log_path, f"{filename}.csv")
+        exist_flag = os.path.isfile(csv_path)
+        headers = ['seed'] + header
+        with open(csv_path, 'a', newline='') as f :
+            wr = csv.writer(f)
+            if not exist_flag:
+                wr.writerow(headers)
+            data = metric
+            data.insert(0, self.seed)
+            wr.writerow(data)
+
 

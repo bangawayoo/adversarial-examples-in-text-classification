@@ -17,6 +17,20 @@ def load_pkl(path):
     object = pickle.load(handle)
   return object
 
+def load_txt(path):
+  with open(path, "r") as handle:
+    object = handle.readline()
+  return object
+
+def save_txt(object, path):
+  dirname = os.path.dirname(path)
+  if not os.path.exists(dirname):
+    os.mkdir(dirname)
+  with open(path, "w") as handle:
+    handle.write(object)
+
+
+
 def bootstrap_sample(all_unperturbed, all_perturbed, bootstrap_sample_size=2000):
   """
   Adapted from repository of "Mozes, Maximilian, et al. "Frequency-guided word substitutions for detecting textual adversarial examples." EACL (2021)."

@@ -1,15 +1,15 @@
 #!/bin/bash
 export CUDA_VISIBLE_DEVICES=1
-DATASET="sst2"
-RECIPE="textfooler"
+DATASET="imdb"
+RECIPE="bert-attack"
 MODEL="roberta-base-${DATASET} bert-base-uncased-${DATASET}"
 for recipe in $RECIPE
 do
   for model in $MODEL
   do
     LOG_FILE_NAME="${model}_${recipe}"
-    textattack attack --model $model --num-examples 872 --log-to-csv "attack-log/$DATASET/$LOG_FILE_NAME.csv" --model-batch-size 128 --recipe $recipe \
-     --num-workers-per-device 16 --dataset-from-huggingface glue^sst2\
+    textattack attack --model $model --num-examples 100 --log-to-csv "attack-log/$DATASET/$LOG_FILE_NAME.csv" --model-batch-size 256 --recipe $recipe \
+     --num-workers-per-device 8 --parallel\
      2>&1 | tee "attack-log/$DATASET/$LOG_FILE_NAME.txt"
   done
 done

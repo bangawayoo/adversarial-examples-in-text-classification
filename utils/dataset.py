@@ -90,7 +90,7 @@ def read_testset_from_csv(filename, use_original=False, split_type='random_sampl
       raise Exception(f"Dataset is too small to sample enough adverserial samples. Total: {num_samples}, Adv.: {num_adv}")
 
     np.random.seed(seed)
-    rand_idx =  np.arange(num_samples)
+    rand_idx = np.arange(num_samples)
     np.random.shuffle(rand_idx)
 
     split_point = int(num_samples*split_ratio)

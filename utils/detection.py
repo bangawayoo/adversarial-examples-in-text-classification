@@ -8,6 +8,9 @@ from tqdm import tqdm
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from transformers import GPT2LMHeadModel, GPT2TokenizerFast
+
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -108,20 +111,22 @@ def get_test_features(model_wrapper, batch_size, dataset, params, logger=None):
       lower = i * batch_size
       upper = min((i + 1) * batch_size, num_samples)
       examples = dataset[lower:upper]
+      if len(examples) == 0:
+        continue
       output = model_wrapper.inference(examples, output_hs=True, output_attention=True)
       att_mask = model_wrapper.get_att_mask(examples)
 
-      if type(layer) == int :
+      if type(layer) == int:
         feat = output.hidden_states[layer][:, 0, :].cpu()  # output.hidden_states : (Batch_size, sequence_length, hidden_dim)
         features.append(feat.cpu())
-        log_prob_sum = torch.zeros(len(examples)).to(model_wrapper.model.device)
+        log_prob_sum = torch.zeros(len(examples)).to(model_wrapper.device)
         start_seq = 1 if params['model_param']['exclude_cls_token'] else 0
         for l in range(1, params['layer_param']['num_layer']+1):
           if params['model_param']['type'] == "cosine_sim":
-            query = output.hidden_states[layer-l+1][:, 0, :].to(model_wrapper.model.device) #(batch_size, hidden_dim)
+            query = output.hidden_states[layer-l+1][:, 0, :].to(model_wrapper.device) #(batch_size, hidden_dim)
             word_vectors = output.hidden_states[layer-l][:, start_seq:, :]#(batch_size, seq  , hidden_dim)
             word_vectors = word_vectors / torch.norm(word_vectors, p=2, dim=-1, keepdim=True)
-            word_vectors = word_vectors * att_mask[:,start_seq:,None].to(model_wrapper.model.device)
+            word_vectors = word_vectors * att_mask[:,start_seq:,None].to(model_wrapper.device)
             query = query / torch.norm(query, p=2, dim=-1, keepdim=True)
             inner_product = torch.einsum("bh, bsh -> bs", query, word_vectors)
             if params['model_param']['normalization'] == 'l1':
@@ -136,19 +141,19 @@ def get_test_features(model_wrapper, batch_size, dataset, params, logger=None):
             log_prob_layer = torch.sum(topk_log_prob,dim=1)
             log_prob_sum += log_prob_layer
 
-          elif params['model_param']['type'] == "attention" : #50-150 seems fine for use_key, 5~10 for use_query
+          elif params['model_param']['type'] == "attention": #50-150 seems fine for use_key, 5~10 for use_query
             start_seq = 1 if params['model_param']['exclude_cls_token'] else 0
             if params['model_param']['attention_type'] == "key":
               conditional_prob = output.attentions[layer-l+1][:,:,start_seq:,0] #attention score using cls token as key. Then, sum across heads
-            elif params['model_param']['attention_type'] == "query" :
+            elif params['model_param']['attention_type'] == "query":
               conditional_prob = output.attentions[layer-l+1][:,:,0,start_seq:] #attention score using cls token as query. Then, sum across heads
 
-            if params['prob_param']['sum_heads'] :
+            if params['prob_param']['sum_heads']:
               conditional_prob = conditional_prob.sum(1) # Sum across heads
 
-            conditional_prob = conditional_prob / conditional_prob.sum(-1, keepdim=True) # Normalize across sequences
+            conditional_prob = conditional_prob / conditional_prob.sum(-1, keepdim=True)  #Normalize across sequences
             if params['prob_param']['choose_type'] == 'topk':
-              if conditional_prob.shape[-1] < params['prob_param']['topk'] :
+              if conditional_prob.shape[-1] < params['prob_param']['topk']:
                 params['prob_param']['topk'] = conditional_prob.shape[-1]
                 logger.log.debug(f"Topk param truncated to {conditional_prob.shape[-1]}")
               topk_prob = torch.topk(conditional_prob, params['prob_param']['topk'], dim=-1).values #Top k values across sequences
@@ -160,12 +165,13 @@ def get_test_features(model_wrapper, batch_size, dataset, params, logger=None):
               topk_prob = topk_prob.prod(dim=1)
               log_prob_layer = torch.log(topk_prob)
 
-            if not params['prob_param']['sum_heads'] :
+            if not params['prob_param']['sum_heads']:
               topk_prob = topk_prob.sum(1)
               topk_prob = topk_prob / topk_prob.sum(-1, keepdim=True) # Sum across top k sequences
+              log_prob_layer = torch.sum(torch.log(topk_prob), dim=-1)
 
             # Add each layer's log prob.
-            log_prob_sum += log_prob_layer
+            log_prob_sum += log_prob_layer.to(model_wrapper.device)
         probs.append(log_prob_sum.cpu())
 
       else:
@@ -175,6 +181,33 @@ def get_test_features(model_wrapper, batch_size, dataset, params, logger=None):
         probs.append(torch.empty(pooled_feat.shape[0],1))
 
   return torch.cat(features, dim=0), torch.cat(probs, dim=0)
+
+
+def get_softmax(model_wrapper, batch_size, dataset, logger=None):
+  assert logger is not None, "No logger given"
+  num_samples = len(dataset)
+  num_batches = int((num_samples // batch_size) + 1)
+  probs = []
+  negative_entropy = []
+
+  with torch.no_grad():
+    for i in tqdm(range(num_batches)):
+      lower = i * batch_size
+      upper = min((i + 1) * batch_size, num_samples)
+      examples = dataset[lower:upper]
+      if len(examples) == 0:
+        continue
+      output = model_wrapper.inference(examples, output_hs=True, output_attention=True)
+      logit = output.logits
+      prob = F.softmax(logit, dim=-1)
+      max_prob = torch.max(prob, dim=-1).values
+      neg_ent = F.softmax(logit, dim=-1) * F.log_softmax(logit, dim=1)
+      neg_ent = neg_ent.sum(-1)
+      probs.append(max_prob.cpu())
+      negative_entropy.append(neg_ent.cpu())
+
+  return torch.cat(probs, dim=0), torch.cat(negative_entropy, dim=0)
+
 
 def compute_dist(test_features, train_stats, distance_type='mahan', use_marginal=True):
   # stats is list of np.array ; change to torch operations for gradient update
@@ -198,13 +231,13 @@ def compute_dist(test_features, train_stats, distance_type='mahan', use_marginal
       output.append(log_likelihood.unsqueeze(-1))
 
   output = torch.cat(output, dim=1)
-  confidence, conf_indices = torch.max(output, dim=1) # Takes the min of class conditional probability
+  confidence, conf_indices = torch.max(output, dim=1) # Takes the max of class conditional probability
   if use_marginal:
     confidence = torch.log(torch.sum(torch.exp(output), dim=1)) # Takes the marginal probability
   return confidence, conf_indices, output
 
 
-def detect_attack(testset, confidence, conf_indices, fpr_thres=0.05, visualize=False, logger=None, mode=None,
+def detect_attack(testset, confidence, fpr_thres=0.05, visualize=False, logger=None, mode=None,
                   log_metric=False):
   """
   Detect attack for correct samples only to compute detection metric (TPR, recall, precision)
@@ -242,7 +275,14 @@ def detect_attack(testset, confidence, conf_indices, fpr_thres=0.05, visualize=F
                 arrowprops=dict(facecolor='black', width=1, shrink=0.1, headwidth=3))
     ax.legend()
     fig.savefig(os.path.join(logger.log_path, f"{mode}-hist.png"))
-    plt.close()
+
+    # fig, ax = plt.subplots()
+    # ax.plot(fpr, tpr)
+    # ax.plot([0, 1], [0, 1], 'k--')
+    # ax.set_xlim([0.0, 1.0])
+    # ax.set_ylim([0.0, 1.05])
+    # fig.savefig(os.path.join(logger.log_path, f"{mode}-roc.png"))
+    # plt.close()
 
   if log_metric:
     metrics = {"tpr":tpr_at_fpr, "fpr":fpr_thres, "f1":f1, "auc":auc_value}
@@ -250,7 +290,7 @@ def detect_attack(testset, confidence, conf_indices, fpr_thres=0.05, visualize=F
 
   metric1 = (fpr, tpr, thres1)
   metric2 = (precision, recall, thres2)
-  return metric1, metric2, tpr_at_fpr
+  return metric1, metric2, tpr_at_fpr, f1, auc_value
 
 
 def predict_attack(testset, confidence, conf_indices, fpr_thres=0.05, adv_ratio=None, visualize=False, by_class=False):
@@ -382,3 +422,30 @@ def detect_attack_per_cls(testset, confidence, conf_indices, fpr_thres=0.05, vis
   metric1 = (fpr, tpr, thres1)
   metric2 = (precision, recall, thres2)
   return metric1, metric2
+
+
+
+def compute_ppl(texts):
+  MODEL_ID = 'gpt2-large'
+  print(f"Initializing {MODEL_ID}")
+  model = GPT2LMHeadModel.from_pretrained(MODEL_ID).cuda()
+  model.eval()
+  tokenizer = GPT2TokenizerFast.from_pretrained(MODEL_ID)
+  encodings = tokenizer.batch_encode_plus(texts, add_special_tokens=True, truncation=True)
+
+  batch_size = 1
+  num_batch = len(texts) // batch_size
+  eval_loss = 0
+  likelihoods = []
+
+  with torch.no_grad():
+    for i in range(num_batch):
+      start_idx = i * batch_size;
+      end_idx = (i + 1) * batch_size
+      x = encodings[start_idx:end_idx]
+      ids = torch.LongTensor(x[0].ids)
+      ids = ids.cuda()
+      nll = model(input_ids=ids, labels=ids)[0] # negative log-likelihood
+      likelihoods.append(-1 * nll.item())
+
+  return torch.tensor(likelihoods)
