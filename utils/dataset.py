@@ -7,8 +7,9 @@
 import glob
 
 import os
+import sys
+import pdb
 import pickle
-import re
 
 import torch
 from datasets import load_dataset
@@ -18,7 +19,7 @@ from tqdm import tqdm
 
 
 def load_data(args):
-    if args.dataset == "ag_news":
+    if args.dataset == "ag-news":
         dataset = load_dataset("ag_news")
         num_labels = 4
     elif args.dataset == "imdb":
@@ -45,8 +46,8 @@ def get_dataset(args):
     text_key = None
     testset_key = 'validation_%s' % args.mnli_option
   else:
-    text_key = 'text' if (args.dataset in ["ag_news", "imdb", "yelp"]) else 'sentence'
-    testset_key = 'test' if (args.dataset in ["ag_news", "imdb", "yelp"]) else 'validation'
+    text_key = 'text' if (args.dataset in ["ag-news", "imdb", "yelp"]) else 'sentence'
+    testset_key = 'test' if (args.dataset in ["ag-news", "imdb", "yelp"]) else 'validation'
 
   split = 'train'
   trainvalset = dataset[split]
@@ -65,7 +66,8 @@ def split_dataset(dataset, split='trainval', split_ratio=0.8):
     testset = dataset[range(num_samples)]
     return testset
 
-def read_testset_from_csv(filename, use_original=False, split_type='random_sample', seed=0, num_max_adv=500):
+def read_testset_from_csv(filename, use_original=False, split_type='random_sample', seed=0, max_adv_num=500, batch_size=64,
+                          model_wrapper=None, logger=None):
   def clean_text(t):
     t = t.replace("[", "")
     t = t.replace("]", "")
@@ -84,28 +86,12 @@ def read_testset_from_csv(filename, use_original=False, split_type='random_sampl
     split_ratio = 1
 
     while split_ratio >= 1 :
-      split_ratio = num_max_adv / num_adv
-      num_max_adv -= 100
+      split_ratio = max_adv_num / num_adv
+      max_adv_num -= 100
     if split_ratio >= 1:
       raise Exception(f"Dataset is too small to sample enough adverserial samples. Total: {num_samples}, Adv.: {num_adv}")
 
     np.random.seed(seed)
-    rand_idx = np.arange(num_samples)
-    np.random.shuffle(rand_idx)
-
-    split_point = int(num_samples*split_ratio)
-    split_idx = rand_idx[:split_point]
-    split = df.iloc[rand_idx[split_idx]]
-    adv = split.loc[split.result_type==1]
-    adv = adv.rename(columns={"perturbed_text":"text"})
-    num_adv_samples = adv.shape[0]
-
-    other_split_idx = rand_idx[split_point:split_point+num_adv_samples]
-    other_split = df.iloc[other_split_idx].copy()
-    clean = other_split # Use correct and incorrect samples
-    clean.loc[:,'result_type'] = 0
-    clean = clean.rename(columns={"original_text": "text"})
-    testset = pd.concat([adv, clean], axis=0)
 
     if 'test.csv' in filename:
       dtype = 'test'
@@ -116,9 +102,29 @@ def read_testset_from_csv(filename, use_original=False, split_type='random_sampl
 
     file_dir = os.path.dirname(filename)
     file_dir = os.path.join(file_dir, 'random_sample')
-    if not os.path.isdir(file_dir):
-      os.mkdir(file_dir)
-    testset.to_csv(os.path.join(file_dir, f'{dtype}-{seed}.csv'))
+    csv_path = os.path.join(file_dir,f'{dtype}-{seed}.csv')
+    if os.path.isfile(csv_path):
+      testset = pd.read_csv(csv_path)
+    else:
+      rand_idx = np.arange(num_samples)
+      np.random.shuffle(rand_idx)
+
+      split_point = int(num_samples*split_ratio)
+      split_idx = rand_idx[:split_point]
+      split = df.iloc[rand_idx[split_idx]]
+      adv = split.loc[split.result_type==1]
+      adv = adv.rename(columns={"perturbed_text":"text"})
+      num_adv_samples = adv.shape[0]
+
+      other_split_idx = rand_idx[split_point:split_point+num_adv_samples]
+      other_split = df.iloc[other_split_idx].copy()
+      clean = other_split # Use correct and incorrect samples
+      clean.loc[:,'result_type'] = 0
+      clean = clean.rename(columns={"original_text": "text"})
+      testset = pd.concat([adv, clean], axis=0)
+      if not os.path.isdir(file_dir):
+        os.mkdir(file_dir)
+      testset.to_csv(os.path.join(file_dir, f'{dtype}-{seed}.csv'))
 
   elif split_type in ['control_success', 'attack_scenario']:
     attack_success = df.loc[df.result_type == 1][['perturbed_text', 'result_type', 'ground_truth_output']]
@@ -148,6 +154,63 @@ def read_testset_from_csv(filename, use_original=False, split_type='random_sampl
   df['original_text'] = df['original_text'].apply(clean_text)
   df['perturbed_text'] = df['perturbed_text'].apply(clean_text)
   testset['text'] = testset['text'].apply(clean_text)
+
+  if model_wrapper:
+    dataset = df[['perturbed_text', 'original_text']]
+    gt = df['ground_truth_output'].tolist()
+    # Compute Acc. on dataset
+    num_samples = len(dataset)
+    num_batches = int((num_samples // batch_size) + 1)
+    target_adv_indices = []
+
+    correct = 0
+    adv_correct = 0
+    total = 0
+    adv_pred = []
+    clean_pred = []
+
+    with torch.no_grad():
+      for i in tqdm(range(num_batches)):
+        lower = i * batch_size
+        upper = min((i + 1) * batch_size, num_samples)
+        adv_examples = dataset['perturbed_text'][lower:upper].tolist()
+        clean_examples = dataset['original_text'][lower:upper].tolist()
+        labels = gt[lower:upper]
+
+        y = torch.LongTensor(labels).to(model_wrapper.model.device)
+        output = model_wrapper.inference(adv_examples)
+        preds = torch.max(output.logits, dim=1).indices
+        adv_pred.append(preds.cpu().numpy())
+        adv_correct += y.eq(preds).sum().item()
+        adv_error_idx = preds.ne(y)
+
+        output = model_wrapper.inference(clean_examples)
+        preds = torch.max(output.logits, dim=1).indices
+        clean_pred.append(preds.cpu().numpy())
+        correct += y.eq(preds).sum().item()
+        clean_correct_idx = preds.eq(y)
+        total += preds.size(0)
+
+        target_adv_idx = torch.logical_and(adv_error_idx, clean_correct_idx)
+        target_adv_indices.append(target_adv_idx.cpu().numpy())
+
+    """
+    Sanity Check : prediction results should be equivalent to FGWS predictions 
+    """
+    logger.log.info("Sanity Check for testset")
+    target_adv_indices = np.concatenate(target_adv_indices, axis=0)
+    adv_pred = np.concatenate(adv_pred, axis=0)
+    clean_pred = np.concatenate(clean_pred, axis=0)
+    fgws_adv_pred = df['perturbed_output'].values
+    fgws_adv_pred[np.isnan(fgws_adv_pred)] = adv_pred[np.isnan(fgws_adv_pred)]
+    adv_pred_diff = (np.not_equal(adv_pred, fgws_adv_pred)).sum()
+    clean_pred_diff = (np.not_equal(clean_pred, df['original_output'].values)).sum()
+    incorrect_indices = np.not_equal(df['original_output'].values, df['ground_truth_output'].values)
+    logger.log.info(f"# of adv. predictions different : {adv_pred_diff}")
+    logger.log.info(f"# of clean predictions different : {clean_pred_diff}")
+    logger.log.info(f"Clean Accuracy {correct/total}")
+    logger.log.info(f"Robust Accuracy {adv_correct/total}")
+    logger.log.info(f"Adv. Success Rate {target_adv_indices.sum() / total}")
 
   return testset, df
 
@@ -246,11 +309,11 @@ def split_csv_to_testval(dir_name, val_ratio, seed=0):
   for root, d_names, f_names in os.walk(dir_name):
     flag = False
     for file in f_names:
-      if "test" in file or "val" in file:
-        flag = False
-        break
       if file.endswith(".csv"):
         flag = True
+      if "test" in file or "val" in file:
+        flag = False
+        # break
     if flag:
       csv_dir.append(root)
 
@@ -272,15 +335,22 @@ def split_csv_to_testval(dir_name, val_ratio, seed=0):
     dir = os.path.dirname(file)
     csv_name = os.path.basename(file)[:-4]
     valset = df.iloc[indices[:split_point]]
-    val_path = os.path.join(dir, "val.csv")
-    valset.to_csv(val_path)
+    if val_ratio == 0 :
+      print(f"Skipping validation set for {file}")
+    else:
+      val_path = os.path.join(dir, "val.csv")
+      valset.to_csv(val_path)
     testset = df.iloc[indices[split_point:]]
     testpath = os.path.join(dir, "test.csv")
     testset.to_csv(testpath)
 
-import sys
 
 if __name__ == "__main__":
   seed=0
-  path = os.path.join("attack-log", sys.argv[-1])
-  split_csv_to_testval(path, val_ratio=0.3, seed=seed)
+  dataset = sys.argv[-1]
+  path = os.path.join("attack-log", dataset)
+  if dataset == "sst2":
+    val_ratio=0.0
+  else:
+    val_ratio=0.3
+  split_csv_to_testval(path, val_ratio=val_ratio, seed=seed)

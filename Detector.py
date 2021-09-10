@@ -1,11 +1,15 @@
+import pdb
+
 from utils.detection import *
 from utils.dataset import *
 from utils.miscellaneous import *
 
 class Detector():
   def __init__(self, tune_params, model_wrapper, val_data_path, train_stats,
-               logger, params, seed=0):
-    #TODO: num_max_adv should be given as an argumnet depending on the dataset
+               logger, params, dataset=None, seed=0):
+    #TODO: max_adv_num should be given as an argumnet depending on the dataset
+    self.max_adv_num_dict = {'imdb':2000, 'ag-news':2000, 'sst2':1000}
+    self.max_adv_num = self.max_adv_num_dict[dataset]
     self.tune_params = tune_params
     self.params = params
     self.model_wrapper = model_wrapper
@@ -15,18 +19,19 @@ class Detector():
     self.seed = seed
     self.data = None
     self.best_params = None
-    self.batch_size = 32
+    self.batch_size = 64
 
     basedir = os.path.join(logger.log_path, 'params')
     self.best_params_path = os.path.join(basedir, f"best_params-seed{self.seed}.txt")
-    self.data = self.get_data(val_data_path, num_max_adv=1000)
+    self.data = self.get_data(val_data_path, max_adv_num=self.max_adv_num)
 
-  def get_data(self, val_data_path, num_max_adv=500):
-    # num_max_adv : number of maximum adversarial samples to be tested
+  def get_data(self, val_data_path, max_adv_num):
+    # max_adv_num : number of maximum adversarial samples to be tested
     # If not possible, this is decremented by 100 until possible
     if val_data_path.endswith(".csv"):
       dataset, _ = read_testset_from_csv(val_data_path, use_original=False,
-                                                   split_type='random_sample', seed=self.seed, num_max_adv=num_max_adv)
+                                                   split_type='random_sample', seed=self.seed, max_adv_num=max_adv_num,
+                                         batch_size=128, model_wrapper=None, logger=self.logger)
     elif val_data_path.endswith(".pkl"):
       dataset = read_testset_from_pkl(val_data_path, self.model_wrapper,
                                       batch_size=128, logger=self.logger)
@@ -38,21 +43,15 @@ class Detector():
     return dataset
 
   def grid_search(self, fpr_thres, tune_params=False):
-    if os.path.exists(self.best_params_path) and not tune_params:
-      params = load_txt(self.best_params_path)
-      try: params = int(params)
-      except: self.logger.log.info(f"Cannot convert {self.best_params_path} to int")
-      self.best_params = params
-      self.logger.log.info(f"Using Existing param in {self.best_params_path}")
-      return self.best_params
-
     self.logger.log.info("---------Starting Grid Search------------")
     texts = self.data['text'].tolist()
-    best = {'tpr':0}
+    best = {'tpr':0, 'auc':0}
 
     start_k, end_k, step_k = self.tune_params['topk']['start'], self.tune_params['topk']['end'], self.tune_params['topk']['step']
-    for k in range(start_k, end_k, step_k):
-      self.params['prob_param']['topk'] = k
+    for k in np.arange(start_k, end_k, step_k):
+      self.params['prob_param']['topk'] = int(k)
+      self.params['prob_param']['p'] = k
+      self.params['prob_param']['ratio'] = k
       self.logger.log.info(f"K={k}")
       test_features, probs = get_test_features(self.model_wrapper, batch_size=self.batch_size, dataset=texts, params=self.params,
                                                logger=self.logger)
@@ -79,14 +78,16 @@ class Detector():
       self.logger.log.info("-----Results for Conditional Probability OOD------")
       _, _, _, _, _ = detect_attack(self.data, probs, fpr_thres,
                               visualize=False, logger=self.logger, mode="conditional")
-      if tpr_at_fpr > best['tpr']:
+
+      if auc > best['auc']:
         best['tpr'] = tpr_at_fpr
         best['k'] = k
         best['roc'] = roc
+        best['auc'] = auc
         best_conf = refined_confidence
 
     self.best_params = best['k']
-    self.logger.log.info(f"Best : {best['tpr']} at k={best['k']}")
+    self.logger.log.info(f"Best : {best['auc']} at k={best['k']}")
     self.save_best_params()
 
     return self.best_params
@@ -96,12 +97,30 @@ class Detector():
     save_txt(best_params_str, self.best_params_path)
 
   def test(self, test_data_path, fpr_thres):
-    testset = self.get_data(test_data_path, num_max_adv=2000)
-    texts = testset['text'].tolist()
-    assert self.best_params is not None, "Check if params is tuned"
+    # if os.path.exists(self.best_params_path):
+    #   params = load_txt(self.best_params_path)
+    #   try: params = float(params)
+    #   except: self.logger.log.info(f"Cannot convert {self.best_params_path} to float")
+    #   self.best_params = params
+    #   self.logger.log.info(f"Using Existing param in {self.best_params_path}")
+    #   return self.best_params
 
-    self.logger.log.info(f"---------Test Mode with k = {self.best_params}---------")
-    self.params['prob_param']['topk'] = self.best_params
+    testset = self.get_data(test_data_path, max_adv_num=self.max_adv_num)
+    texts = testset['text'].tolist()
+    # import random
+    # random.seed(0)
+    # random.shuffle(texts)
+    # label = testset['result_type'].tolist()
+    # random.seed(0)
+    # random.shuffle(label)
+    # testset['result_type'] = label
+
+    # assert self.best_params is not None, "Check if params is tuned"
+    if self.best_params is not None:
+      self.logger.log.info(f"---------Test Mode with k = {self.best_params}---------")
+      self.params['prob_param']['topk'] = int(self.best_params)
+      self.params['prob_param']['p'] = self.best_params
+      self.params['prob_param']['ratio'] = self.best_params
     test_features, probs = get_test_features(self.model_wrapper, batch_size=self.batch_size, dataset=texts, params=self.params,
                                              logger=self.logger)
     confidence, conf_indices, distance = compute_dist(test_features, self.stats, distance_type="euclidean",
@@ -111,7 +130,7 @@ class Detector():
     num_nans = sum(probs == -float("Inf"))
     if num_nans != 0:
       self.logger.log.info(f"Warning : {num_nans} Nans in conditional probability")
-      probs[probs == -float("inf")] = -1e6
+      probs[probs == -float("inf")] = 1e-3
     refined_confidence = confidence + probs.squeeze()
     refined_confidence[refined_confidence == -float("Inf")] = -1e6
     refined_confidence[torch.isnan(refined_confidence)] = -1e6
@@ -126,7 +145,7 @@ class Detector():
     roc, pr, tpr_at_fpr, f1, auc = detect_attack(testset, refined_confidence,
                                          fpr_thres,
                                          visualize=True, logger=self.logger, mode="Hierarchical", log_metric=True)
-    self.logger.save_custom_metric("results", [tpr_at_fpr, fpr_thres, f1, auc], metric_header)
+    self.logger.save_custom_metric("results", [tpr_at_fpr, fpr_thres, f1, auc, self.best_params], metric_header+["topk"])
 
     self.logger.log.info("-----Results for Conditional Probability OOD------")
     roc, pr, tpr_at_fpr, f1, auc = detect_attack(testset, probs, fpr_thres,
@@ -137,7 +156,7 @@ class Detector():
 
 
   def test_baseline(self, test_data_path, fpr_thres):
-    testset = self.get_data(test_data_path, num_max_adv=2000)
+    testset = self.get_data(test_data_path, max_adv_num=2000)
     texts = testset['text'].tolist()
 
     self.logger.log.info("---------Baseline Test Mode---------")
@@ -164,7 +183,7 @@ class Detector():
     return
 
   def test_baseline_PPL(self, test_data_path, fpr_thres):
-    testset = self.get_data(test_data_path, num_max_adv=2000)
+    testset = self.get_data(test_data_path, max_adv_num=2000)
     texts = testset['text'].tolist()
     confidence = compute_ppl(texts)
     metric_header = ["tpr", "fpr", "f1", "auc"]

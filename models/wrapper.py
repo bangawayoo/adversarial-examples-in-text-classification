@@ -11,8 +11,10 @@ import torch
 class BertWrapper:
     def __init__(self, config, logger):
         self.config = config
-        self.max_seq_len = 512
-        num_classes = {"imdb":2, "sst2":2, "agnews":4}
+        max_seq_len_dict = {"imdb":512, "sst2":64, "ag-news":256}
+        self.max_seq_len = max_seq_len_dict[config.dataset]
+        self.seq_len_cache = []
+        num_classes = {"imdb":2, "sst2":2, "ag-news":4}
         use_text_attack = True if 'textattack' in config.target_model else False
         logger.log.info(f"Loading {config.target_model}")
         if use_text_attack:
@@ -65,8 +67,9 @@ class BertWrapper:
 
     def inference(self, text, output_hs=False, output_attention=False):
         text = self.__pre_process(text)
-        x = self.tokenizer(text, max_length=self.max_seq_len, add_special_tokens=True, padding=True, truncation=True,
+        x = self.tokenizer(text, max_length=self.max_seq_len, add_special_tokens=True, padding="max_length", truncation=True,
                       return_attention_mask=True, return_tensors='pt')
+        self.seq_len_cache.extend(x.attention_mask.sum(-1).tolist())
         output = self.model(input_ids=x['input_ids'].to(self.device), attention_mask=x['attention_mask'].to(self.device),
                        token_type_ids=(x['token_type_ids'].to(self.device) if 'token_type_ids' in x else None),
                        output_hidden_states=output_hs, output_attentions=output_attention)
@@ -74,6 +77,6 @@ class BertWrapper:
 
     def get_att_mask(self, text):
         text = self.__pre_process(text)
-        x = self.tokenizer(text, max_length=self.max_seq_len, add_special_tokens=True, padding=True, truncation=True,
+        x = self.tokenizer(text, max_length=self.max_seq_len, add_special_tokens=True, padding="max_length", truncation=True,
                       return_attention_mask=True, return_tensors='pt')
         return x['attention_mask'].to(self.device)
