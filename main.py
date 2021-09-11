@@ -1,7 +1,14 @@
 import argparse
 import json
 import pdb
+
+import torch
 from textattack import attack_recipes
+from sklearn.decomposition import KernelPCA, PCA
+from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis as QDA
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
+from sklearn import random_projection
+
 parser = argparse.ArgumentParser(description="Detect and defense attacked samples")
 
 parser.add_argument("--dataset", default="imdb", type=str,
@@ -11,9 +18,9 @@ parser.add_argument("--preprocess", default="standard", type=str,
                     choices=["standard", "fgws"])
 parser.add_argument("--target_model", default="textattack/bert-base-uncased-imdb", type=str, #textattack/roberta-base-SST-2
                     help="type of model (textattack pretrained model, path to ckpt)")
-parser.add_argument("--test_adv", default="attack-log/imdb/roberta/textfooler/test.csv", type=str,
+parser.add_argument("--test_adv", default="attack-log/imdb/bert/textfooler/test.csv", type=str,
                     help="perturbed texts files with extension csv or pkl")
-parser.add_argument("--val_adv", default="attack-log/imdb/roberta/textfooler/test.csv", type=str,
+parser.add_argument("--val_adv", default="attack-log/imdb/bert/textfooler/test.csv", type=str,
                     help="perturbed texts files with extension csv or pkl")
 parser.add_argument("--attack_type", default='textfooler', type=str,
                     help="attack type for logging")
@@ -76,11 +83,33 @@ if __name__ == "__main__":
   text_key, testset_key = key
   trainset, _ = split_dataset(trainvalset, split='trainval', split_ratio=1.0)
   train_features = get_train_features(model_wrapper, args, batch_size=256, dataset=trainset, text_key=text_key, layer=params['layer_param']['cls_layer'])
-  train_stats = get_stats(train_features, use_shared_cov=True)
+
+  feats = []
+  for cls, x in enumerate(train_features):
+      data = torch.cat(x, dim=0)
+      cls_vector = torch.tensor(cls).repeat(data.shape[0], 1)
+      feats.append(torch.cat([data, cls_vector], dim=1))
+
+  feats = torch.cat(feats, dim=0)
+  sample_idx = torch.randperm(len(feats))[:1000]
+  sampled_feats = feats[sample_idx, :-1].numpy()
+  labels = feats[sample_idx, -1].numpy()
+
+  reducer = None
+  if False:
+    reducer = LDA()
+    reduced_feat = reducer.fit_transform(sampled_feats, labels)
+  else:
+    # reducer = random_projection.GaussianRandomProjection(eps=0.5)
+    # reduced_feat = reducer.fit_transform(sampled_feats)
+    reducer = KernelPCA(n_components=750, kernel='rbf', random_state=0)
+    reduced_feat = reducer.fit_transform(sampled_feats)
+
+  train_stats = get_stats(reduced_feat, labels, use_shared_cov=True)
 
   k_s = list(map(lambda x: float(x), args.k_tune_range.split()))
   tune_params = {'topk': {'start':k_s[0], 'end':k_s[1], 'step':k_s[2]}}
-  detector = Detector(tune_params, model_wrapper, args.val_adv, train_stats, logger, params, dataset=args.dataset , seed=args.seed)
+  detector = Detector(tune_params, model_wrapper, args.val_adv, train_stats, logger, params, reducer, dataset=args.dataset , seed=args.seed)
   if args.baseline:
     pass
     # detector.test_baseline_PPL(args.test_adv, args.fpr_threshold)

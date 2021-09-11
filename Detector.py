@@ -6,7 +6,7 @@ from utils.miscellaneous import *
 
 class Detector():
   def __init__(self, tune_params, model_wrapper, val_data_path, train_stats,
-               logger, params, dataset=None, seed=0):
+               logger, params, dim_reducer, dataset=None, seed=0):
     #TODO: max_adv_num should be given as an argumnet depending on the dataset
     self.max_adv_num_dict = {'imdb':2000, 'ag-news':2000, 'sst2':1000}
     self.max_adv_num = self.max_adv_num_dict[dataset]
@@ -19,7 +19,8 @@ class Detector():
     self.seed = seed
     self.data = None
     self.best_params = None
-    self.batch_size = 64
+    self.batch_size = 32 if dataset=="imdb" else 64
+    self.dim_reducer = dim_reducer
 
     basedir = os.path.join(logger.log_path, 'params')
     self.best_params_path = os.path.join(basedir, f"best_params-seed{self.seed}.txt")
@@ -123,22 +124,25 @@ class Detector():
       self.params['prob_param']['ratio'] = self.best_params
     test_features, probs = get_test_features(self.model_wrapper, batch_size=self.batch_size, dataset=texts, params=self.params,
                                              logger=self.logger)
+    if self.dim_reducer:
+      test_features = torch.tensor(self.dim_reducer.transform(test_features.numpy()))
+
     confidence, conf_indices, distance = compute_dist(test_features, self.stats, distance_type="euclidean",
                                                       use_marginal=False)
     if probs.dim() == 1:
       probs = probs.unsqueeze(-1)
-    num_nans = sum(probs == -float("Inf"))
+    num_nans = torch.sum(probs == -float("Inf")).item()
     if num_nans != 0:
       self.logger.log.info(f"Warning : {num_nans} Nans in conditional probability")
       probs[probs == -float("inf")] = 1e-3
-    refined_confidence = confidence + probs.squeeze()
+
+    refined_confidence = confidence + torch.log(probs.squeeze())
     refined_confidence[refined_confidence == -float("Inf")] = -1e6
     refined_confidence[torch.isnan(refined_confidence)] = -1e6
 
     metric_header = ["tpr", "fpr", "f1", "auc"]
     self.logger.log.info("-----Results for Baseline OOD------")
-    roc, pr, naive_tpr, f1, auc = detect_attack(testset, confidence, fpr_thres,
-                                visualize=True, logger=self.logger, mode="Baseline")
+    roc, pr, naive_tpr, f1, auc = detect_attack(testset, confidence, fpr_thres, visualize=True, logger=self.logger, mode="Baseline")
     self.logger.save_custom_metric("baseline_OOD", [naive_tpr, fpr_thres, f1, auc], metric_header)
 
     self.logger.log.info("-----Results for Hierarchical OOD------")
@@ -151,7 +155,7 @@ class Detector():
     roc, pr, tpr_at_fpr, f1, auc = detect_attack(testset, probs, fpr_thres,
                             visualize=True, logger=self.logger, mode="conditional")
     self.logger.save_custom_metric("token-cond_prob", [tpr_at_fpr, fpr_thres, f1, auc], metric_header)
-
+    pdb.set_trace()
     return roc, auc, tpr_at_fpr, naive_tpr, refined_confidence, testset
 
 
@@ -179,7 +183,6 @@ class Detector():
                                          fpr_thres,
                                          visualize=False, logger=self.logger, mode="Baseline:NegEnt.", log_metric=True)
     self.logger.save_custom_metric("neg_ent-results", [tpr, fpr_thres, f1, auc], metric_header)
-
     return
 
   def test_baseline_PPL(self, test_data_path, fpr_thres):
