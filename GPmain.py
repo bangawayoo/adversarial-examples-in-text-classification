@@ -2,12 +2,16 @@ import argparse
 import json
 import pdb
 
+import numpy as np
 import torch
 from textattack import attack_recipes
-from sklearn.decomposition import KernelPCA, PCA
-from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis as QDA
+from sklearn.gaussian_process import GaussianProcessRegressor, GaussianProcessClassifier
+from sklearn.gaussian_process.kernels import DotProduct, WhiteKernel
+from sklearn.metrics.pairwise import polynomial_kernel
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
 from sklearn import random_projection
+from sklearn.decomposition import KernelPCA, PCA
+
 
 parser = argparse.ArgumentParser(description="Detect and defense attacked samples")
 
@@ -39,7 +43,7 @@ parser.add_argument("--tune_params", default=False, action="store_true",
 parser.add_argument("--model_params_path", type=str, default="params/attention_key-exclude.json",
                     help="path to json file containing params about probability modeling")
 
-parser.add_argument("--gpu", default='0', type=str)
+parser.add_argument("--gpu", default='1', type=str)
 parser.add_argument("--seed", default=0, type=int)
 parser.add_argument("--mnli_option", default="matched", type=str,
                     choices=["matched", "mismatched"],
@@ -53,7 +57,7 @@ from utils.dataset import *
 from utils.logger import *
 from utils.miscellaneous import *
 from models.wrapper import BertWrapper
-from Detector import Detector
+from GPDetector import Detector
 
 #List of hyper-parameters
 model_type = args.target_model.replace("/","-")
@@ -90,33 +94,61 @@ if __name__ == "__main__":
       cls_vector = torch.tensor(cls).repeat(data.shape[0], 1)
       feats.append(torch.cat([data, cls_vector], dim=1))
 
-  feats = torch.cat(feats, dim=0)
+  NUM_SAMPLE = 5000
+  torch.manual_seed(0)
+  feats = torch.cat(feats, dim=0).numpy()
+  sample_idx = torch.randperm(len(feats))[:NUM_SAMPLE].numpy()
 
-  if params['']:
-    SAMPLE = True
-    if SAMPLE:
-      torch.manual_seed(0)
-      num_sample = {"imdb": 3000, "ag-news": 4000, "sst2": 8000}
-      sample_idx = torch.randperm(len(feats))[:num_sample[args.dataset]]
-      sampled_feats = feats[sample_idx, :-1].numpy()
-      labels = feats[sample_idx, -1].numpy()
+  SAMPLE = True
+  if SAMPLE:
+    sampled = feats[sample_idx, :]
+    feats = sampled[:, :-1]
+    labels = sampled[:, -1]
+  else:
+    labels = feats[:, -1]
+    feats = feats[:, :-1]
 
+  if True:
     # reducer = LDA()
-    # reduced_feat = reducer.fit_transform(sampled_feats, labels)
+    # reduced_feat = reducer.fit_transform(feats, labels)
     # reducer = random_projection.GaussianRandomProjection(eps=0.5)
     # reduced_feat = reducer.fit_transform(sampled_feats)
     reducer = KernelPCA(n_components=50, kernel='rbf', random_state=0)
-    reduced_feat = reducer.fit_transform(sampled_feats)
+    reduced_feat = reducer.fit_transform(feats)
   else:
       reducer = None
-      reduced_feat = feats[:, :-1].numpy()
-      labels = feats[:, -1].numpy()
+      reduced_feat = feats
 
-  train_stats = get_stats(reduced_feat, labels, use_shared_cov=False)
+
+  train_stats = get_stats(reduced_feat, labels, use_shared_cov=True)
+
+  GPs = []
+  USE_REGRESSOR = True
+  if USE_REGRESSOR:
+    for cls in range(len(train_stats)):
+      phi = reduced_feat[labels==cls] - train_stats[cls][0]
+      cls_label = labels[labels==cls]
+      # K = polynomial_kernel(phi, phi, degree=1, gamma=1, coef0=0)
+      # Gps.append(K)
+      kernel = DotProduct()
+      gpr = GaussianProcessRegressor(kernel=kernel, random_state=0, alpha=1e-3, n_restarts_optimizer=3).fit(phi, cls_label)
+      GPs.append(gpr)
+  else:
+    x,y = [], []
+    for cls in range(len(train_stats)):
+      phi = reduced_feat[labels==cls] - train_stats[cls][0]
+      cls_label = labels[labels==cls]
+      x.append(phi)
+      y.append(cls_label)
+
+    x, y = np.concatenate(x), np.concatenate(y)
+    kernel = DotProduct()
+    gpr = GaussianProcessClassifier(kernel=kernel, random_state=0).fit(x,y)
+
 
   k_s = list(map(lambda x: float(x), args.k_tune_range.split()))
   tune_params = {'topk': {'start':k_s[0], 'end':k_s[1], 'step':k_s[2]}}
-  detector = Detector(tune_params, model_wrapper, args.val_adv, train_stats, logger, params, reducer, dataset=args.dataset , seed=args.seed)
+  detector = Detector(tune_params, model_wrapper, args.val_adv, train_stats, logger, params, reducer, kernel_args=(GPs, phi), dataset=args.dataset , seed=args.seed)
   if args.baseline:
     pass
     # detector.test_baseline_PPL(args.test_adv, args.fpr_threshold)

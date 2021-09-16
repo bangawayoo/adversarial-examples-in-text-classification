@@ -114,88 +114,22 @@ def get_test_features(model_wrapper, batch_size, dataset, params, logger=None):
       if len(examples) == 0:
         continue
       output = model_wrapper.inference(examples, output_hs=True, output_attention=True)
-      # logit = output.logits
-      # prob = F.softmax(logit, dim=-1)
-      att_mask = model_wrapper.get_att_mask(examples)
+      seq_len = model_wrapper.seq_len_cache[-len(examples):]
+      logit = output.logits
+      prob = F.softmax(logit, dim=-1)
+      max_prob = torch.max(prob, dim=-1).values
+      feat = output.hidden_states[layer][:, 0, :].cpu()  # output.hidden_states : (Batch_size, sequence_length, hidden_dim)
+      cls_token = output.hidden_states[layer][:, 0, :].cpu()
+      words = output.hidden_states[layer][:, 1:, :].cpu()
+      word_distance = torch.norm(cls_token.unsqueeze(1) - words, dim=-1)
 
-      if type(layer) == int:
-        feat = output.hidden_states[layer][:, 0, :].cpu()  # output.hidden_states : (Batch_size, sequence_length, hidden_dim)
-        features.append(feat.cpu())
-        log_prob_sum = torch.zeros(len(examples)).to(model_wrapper.device)
-        start_seq = 1 if params['model_param']['exclude_cls_token'] else 0
-        for l in range(1, params['layer_param']['num_layer']+1):
-          if params['model_param']['type'] == "cosine_sim":
-            query = output.hidden_states[layer-l+1][:, 0, :].to(model_wrapper.device) #(batch_size, hidden_dim)
-            word_vectors = output.hidden_states[layer-l][:, start_seq:, :]#(batch_size, seq  , hidden_dim)
-            word_vectors = word_vectors / torch.norm(word_vectors, p=2, dim=-1, keepdim=True)
-            word_vectors = word_vectors * att_mask[:,start_seq:,None].to(model_wrapper.device)
-            query = query / torch.norm(query, p=2, dim=-1, keepdim=True)
-            inner_product = torch.einsum("bh, bsh -> bs", query, word_vectors)
+      word_ll = (-0.5 * word_distance) + math.log((2 * math.pi) ** (-feat.shape[-1] / 2))
+      for idx, seq in enumerate(seq_len):
+        word_ll[idx, seq:] = 0
+      word_ll = torch.sum(word_ll, dim=-1) / torch.tensor(seq_len)
 
-            seq_len = att_mask.sum(-1).long().squeeze()
-            for idx, seq in enumerate(seq_len):
-              inner_product[idx, seq:] = 0
-
-            if params['model_param']['normalization'] == 'l1':
-              inner_product[inner_product <= 0] = 1e-12
-              conditional_prob = inner_product / torch.sum(inner_product, dim=-1, keepdim=True)
-            elif params['model_param']['normalization'] == 'softmax':
-              T = params['model_param']['temperature']
-              conditional_prob = torch.exp(inner_product/T) / torch.exp(inner_product/T).sum(-1, keepdims=True)
-
-
-          elif params['model_param']['type'] == "attention":
-            start_seq = 1 if params['model_param']['exclude_cls_token'] else 0
-            if params['model_param']['attention_type'] == "key":
-              conditional_prob = output.attentions[layer-l+1][:,:,start_seq:,0] #attention score using cls token as key. Then, sum across heads
-            elif params['model_param']['attention_type'] == "query":
-              conditional_prob = output.attentions[layer-l+1][:,:,0,start_seq:] #attention score using cls token as query. Then, sum across heads
-            if params['prob_param']['sum_heads']:
-              conditional_prob = conditional_prob.sum(1) # Sum across heads
-            else:
-              bs = conditional_prob.shape[0]
-              conditional_prob = conditional_prob.reshape(bs, -1)
-
-            seq_len = att_mask.sum(-1).long().squeeze()
-            for idx, seq in enumerate(seq_len):
-              conditional_prob[idx, seq:] = 0
-            conditional_prob = conditional_prob / conditional_prob.sum(-1, keepdim=True)  #Normalize across sequences
-
-          if params['prob_param']['choose_type'] == 'topk':
-            if conditional_prob.shape[-1] < params['prob_param']['topk']:
-              params['prob_param']['topk'] = conditional_prob.shape[-1]
-              logger.log.debug(f"Topk param truncated to {conditional_prob.shape[-1]}")
-            topk_prob = torch.topk(conditional_prob, params['prob_param']['topk'], dim=-1).values #Top k values across sequences
-            topk_prob[topk_prob==0] = 1
-            log_prob_layer = torch.sum(torch.log(topk_prob), dim=-1)
-          elif params['prob_param']['choose_type'] == 'ratio':
-            token_prob = conditional_prob
-            sorted, indices = torch.sort(token_prob, dim=-1, descending=True)
-            seq_len_ratio = (att_mask.sum(-1) * params['prob_param']['ratio']).long().squeeze()
-            for idx, seq in enumerate(seq_len_ratio):
-              sorted[idx, seq:] = 1
-            log_prob_layer = torch.sum(torch.log(sorted), dim=-1)
-          elif params['prob_param']['choose_type'] == 'threshold':
-            token_prob = conditional_prob
-            sorted, indices = torch.sort(token_prob, dim=-1, descending=True)
-            cumsum = torch.cumsum(sorted, dim=-1)
-            sorted[cumsum > params['prob_param']['p']] = 1
-            log_prob_layer = torch.sum(torch.log(sorted), dim=-1)
-
-            # if not params['prob_param']['sum_heads']:
-            #   token_prob = token_prob.sum(1)
-            #   token_prob = token_prob / token_prob.sum(-1, keepdim=True) # Sum across top k sequences
-            #   log_prob_layer = torch.sum(torch.log(token_prob), dim=-1)
-
-          # Add each layer's log prob.
-          log_prob_sum += log_prob_layer.to(model_wrapper.device)
-        probs.append(log_prob_sum.cpu())
-
-      else:
-        feat = output.hidden_states[-1]  # (Batch_size, 768)
-        pooled_feat = model_wrapper.model.bert.pooler(feat)
-        features.append(pooled_feat.cpu())
-        probs.append(torch.empty(pooled_feat.shape[0],1))
+      features.append(feat.cpu())
+      probs.append(word_ll.cpu())
 
   return torch.cat(features, dim=0), torch.cat(probs, dim=0)
 

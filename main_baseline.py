@@ -92,12 +92,11 @@ if __name__ == "__main__":
 
   feats = torch.cat(feats, dim=0)
 
-  if params['']:
+  if False:
     SAMPLE = True
     if SAMPLE:
       torch.manual_seed(0)
-      num_sample = {"imdb": 3000, "ag-news": 4000, "sst2": 8000}
-      sample_idx = torch.randperm(len(feats))[:num_sample[args.dataset]]
+      sample_idx = torch.randperm(len(feats))[:8000]
       sampled_feats = feats[sample_idx, :-1].numpy()
       labels = feats[sample_idx, -1].numpy()
 

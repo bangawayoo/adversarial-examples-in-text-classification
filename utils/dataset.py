@@ -85,10 +85,10 @@ def read_testset_from_csv(filename, use_original=False, split_type='random_sampl
     num_adv = (df.result_type==1).sum()
     split_ratio = 1
 
-    while split_ratio >= 1 :
+    while split_ratio >= 0.6 and max_adv_num > 0:
       split_ratio = max_adv_num / num_adv
       max_adv_num -= 100
-    if split_ratio >= 1:
+    if split_ratio >= 0.6 or max_adv_num < 0 :
       raise Exception(f"Dataset is too small to sample enough adverserial samples. Total: {num_samples}, Adv.: {num_adv}")
 
     np.random.seed(seed)

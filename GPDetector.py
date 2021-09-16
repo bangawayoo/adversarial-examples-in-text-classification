@@ -1,6 +1,7 @@
 import pdb
 
 import matplotlib.pyplot
+import numpy as np
 
 from utils.detection import *
 from utils.dataset import *
@@ -8,7 +9,7 @@ from utils.miscellaneous import *
 
 class Detector():
   def __init__(self, tune_params, model_wrapper, val_data_path, train_stats,
-               logger, params, dim_reducer, dataset=None, seed=0):
+               logger, params, dim_reducer, kernel_args=None, dataset=None, seed=0):
     #TODO: max_adv_num should be given as an argumnet depending on the dataset
     self.max_adv_num_dict = {'imdb':2000, 'ag-news':2000, 'sst2':1000}
     self.max_adv_num = self.max_adv_num_dict[dataset]
@@ -23,6 +24,7 @@ class Detector():
     self.best_params = None
     self.batch_size = 32 if dataset=="imdb" else 64
     self.dim_reducer = dim_reducer
+    self.kernel_args = kernel_args
 
     basedir = os.path.join(logger.log_path, 'params')
     self.best_params_path = os.path.join(basedir, f"best_params-seed{self.seed}.txt")
@@ -100,23 +102,8 @@ class Detector():
     save_txt(best_params_str, self.best_params_path)
 
   def test(self, test_data_path, fpr_thres):
-    # if os.path.exists(self.best_params_path):
-    #   params = load_txt(self.best_params_path)
-    #   try: params = float(params)
-    #   except: self.logger.log.info(f"Cannot convert {self.best_params_path} to float")
-    #   self.best_params = params
-    #   self.logger.log.info(f"Using Existing param in {self.best_params_path}")
-    #   return self.best_params
-
     testset = self.get_data(test_data_path, max_adv_num=self.max_adv_num)
     texts = testset['text'].tolist()
-    # import random
-    # random.seed(0)
-    # random.shuffle(texts)
-    # label = testset['result_type'].tolist()
-    # random.seed(0)
-    # random.shuffle(label)
-    # testset['result_type'] = label
 
     # assert self.best_params is not None, "Check if params is tuned"
     if self.best_params is not None:
@@ -131,13 +118,27 @@ class Detector():
 
     confidence, conf_indices, distance = compute_dist(test_features, self.stats, distance_type="euclidean",
                                                       use_marginal=False)
-    if probs.dim() == 1:
-      probs = probs.unsqueeze(-1)
-    num_nans = torch.sum(probs == -float("Inf")).item()
+
+
+    uncertainty = []
+    GPs = self.kernel_args[0]
+    for gp, stats in zip(GPs, self.stats):
+      mu = stats[0]
+      test_input = test_features.numpy() - mu
+      std = gp.predict(test_input, return_std=True)[1][:,None]
+      uncertainty.append(std)
+
+    uncertainty = np.concatenate(uncertainty, axis=-1)
+    probs = -torch.tensor([v[idx] for v, idx in zip(uncertainty, conf_indices)])
+    print(probs.mean(), probs.std())
+
+    num_nans = sum(probs == -float("Inf"))
     if num_nans != 0:
       self.logger.log.info(f"Warning : {num_nans} Nans in conditional probability")
       probs[probs == -float("inf")] = 1e-3
 
+    probs = (probs - probs.mean()) / probs.std()
+    confidence = (confidence - confidence.mean()) / confidence.std()
     for weight in [1]:
       # print("Using Weight ", weight)
       refined_confidence = weight * confidence + probs.squeeze()
