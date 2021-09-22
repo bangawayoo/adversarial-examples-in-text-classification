@@ -62,7 +62,14 @@ def get_train_features(model_wrapper, args, batch_size, dataset, text_key, layer
 
   if os.path.exists(f"saved_feats/{model_name}.pkl"):
     features = load_pkl(f"saved_feats/{model_name}.pkl")
-    return features
+    feats_tensor = []
+    for cls, x in enumerate(features):
+      data = torch.cat(x, dim=0)
+      cls_vector = torch.tensor(cls).repeat(data.shape[0], 1)
+      feats_tensor.append(torch.cat([data, cls_vector], dim=1))
+
+    feats_tensor = torch.cat(feats_tensor, dim=0)
+    return feats_tensor
 
   print("Building train features")
   model = model_wrapper.model
@@ -72,7 +79,6 @@ def get_train_features(model_wrapper, args, batch_size, dataset, text_key, layer
   num_batches = int((num_samples // batch_size) + 1)
   features = [[] for _ in range(num_labels)]
 
-  # num_batches = 2
   with torch.no_grad():
     for i in tqdm(range(num_batches)):
       lower = i * batch_size
@@ -103,7 +109,6 @@ def get_test_features(model_wrapper, batch_size, dataset, params, logger=None):
   num_samples = len(dataset)
   num_batches = int((num_samples // batch_size) + 1)
   features = []
-  probs = []
   layer = params['layer_param']['cls_layer']
 
   with torch.no_grad():
@@ -114,90 +119,9 @@ def get_test_features(model_wrapper, batch_size, dataset, params, logger=None):
       if len(examples) == 0:
         continue
       output = model_wrapper.inference(examples, output_hs=True, output_attention=True)
-      # logit = output.logits
-      # prob = F.softmax(logit, dim=-1)
-      att_mask = model_wrapper.get_att_mask(examples)
-
-      if type(layer) == int:
-        feat = output.hidden_states[layer][:, 0, :].cpu()  # output.hidden_states : (Batch_size, sequence_length, hidden_dim)
-        features.append(feat.cpu())
-        log_prob_sum = torch.zeros(len(examples)).to(model_wrapper.device)
-        start_seq = 1 if params['model_param']['exclude_cls_token'] else 0
-        for l in range(1, params['layer_param']['num_layer']+1):
-          if params['model_param']['type'] == "cosine_sim":
-            query = output.hidden_states[layer-l+1][:, 0, :].to(model_wrapper.device) #(batch_size, hidden_dim)
-            word_vectors = output.hidden_states[layer-l][:, start_seq:, :]#(batch_size, seq  , hidden_dim)
-            word_vectors = word_vectors / torch.norm(word_vectors, p=2, dim=-1, keepdim=True)
-            word_vectors = word_vectors * att_mask[:,start_seq:,None].to(model_wrapper.device)
-            query = query / torch.norm(query, p=2, dim=-1, keepdim=True)
-            inner_product = torch.einsum("bh, bsh -> bs", query, word_vectors)
-
-            seq_len = att_mask.sum(-1).long().squeeze()
-            for idx, seq in enumerate(seq_len):
-              inner_product[idx, seq:] = 0
-
-            if params['model_param']['normalization'] == 'l1':
-              inner_product[inner_product <= 0] = 1e-12
-              conditional_prob = inner_product / torch.sum(inner_product, dim=-1, keepdim=True)
-            elif params['model_param']['normalization'] == 'softmax':
-              T = params['model_param']['temperature']
-              conditional_prob = torch.exp(inner_product/T) / torch.exp(inner_product/T).sum(-1, keepdims=True)
-
-
-          elif params['model_param']['type'] == "attention":
-            start_seq = 1 if params['model_param']['exclude_cls_token'] else 0
-            if params['model_param']['attention_type'] == "key":
-              conditional_prob = output.attentions[layer-l+1][:,:,start_seq:,0] #attention score using cls token as key. Then, sum across heads
-            elif params['model_param']['attention_type'] == "query":
-              conditional_prob = output.attentions[layer-l+1][:,:,0,start_seq:] #attention score using cls token as query. Then, sum across heads
-            if params['prob_param']['sum_heads']:
-              conditional_prob = conditional_prob.sum(1) # Sum across heads
-            else:
-              bs = conditional_prob.shape[0]
-              conditional_prob = conditional_prob.reshape(bs, -1)
-
-            seq_len = att_mask.sum(-1).long().squeeze()
-            for idx, seq in enumerate(seq_len):
-              conditional_prob[idx, seq:] = 0
-            conditional_prob = conditional_prob / conditional_prob.sum(-1, keepdim=True)  #Normalize across sequences
-
-          if params['prob_param']['choose_type'] == 'topk':
-            if conditional_prob.shape[-1] < params['prob_param']['topk']:
-              params['prob_param']['topk'] = conditional_prob.shape[-1]
-              logger.log.debug(f"Topk param truncated to {conditional_prob.shape[-1]}")
-            topk_prob = torch.topk(conditional_prob, params['prob_param']['topk'], dim=-1).values #Top k values across sequences
-            topk_prob[topk_prob==0] = 1
-            log_prob_layer = torch.sum(torch.log(topk_prob), dim=-1)
-          elif params['prob_param']['choose_type'] == 'ratio':
-            token_prob = conditional_prob
-            sorted, indices = torch.sort(token_prob, dim=-1, descending=True)
-            seq_len_ratio = (att_mask.sum(-1) * params['prob_param']['ratio']).long().squeeze()
-            for idx, seq in enumerate(seq_len_ratio):
-              sorted[idx, seq:] = 1
-            log_prob_layer = torch.sum(torch.log(sorted), dim=-1)
-          elif params['prob_param']['choose_type'] == 'threshold':
-            token_prob = conditional_prob
-            sorted, indices = torch.sort(token_prob, dim=-1, descending=True)
-            cumsum = torch.cumsum(sorted, dim=-1)
-            sorted[cumsum > params['prob_param']['p']] = 1
-            log_prob_layer = torch.sum(torch.log(sorted), dim=-1)
-
-            # if not params['prob_param']['sum_heads']:
-            #   token_prob = token_prob.sum(1)
-            #   token_prob = token_prob / token_prob.sum(-1, keepdim=True) # Sum across top k sequences
-            #   log_prob_layer = torch.sum(torch.log(token_prob), dim=-1)
-
-          # Add each layer's log prob.
-          log_prob_sum += log_prob_layer.to(model_wrapper.device)
-        probs.append(log_prob_sum.cpu())
-
-      else:
-        feat = output.hidden_states[-1]  # (Batch_size, 768)
-        pooled_feat = model_wrapper.model.bert.pooler(feat)
-        features.append(pooled_feat.cpu())
-        probs.append(torch.empty(pooled_feat.shape[0],1))
-
-  return torch.cat(features, dim=0), torch.cat(probs, dim=0)
+      feat = output.hidden_states[layer][:, 0,:].cpu()  # output.hidden_states : (Batch_size, sequence_length, hidden_dim)
+      features.append(feat.cpu())
+  return torch.cat(features, dim=0)
 
 
 def get_softmax(model_wrapper, batch_size, dataset, logger=None):
@@ -229,7 +153,8 @@ def get_softmax(model_wrapper, batch_size, dataset, logger=None):
 def compute_dist(test_features, train_stats, distance_type='mahan', use_marginal=True):
   # stats is list of np.array ; change to torch operations for gradient update
   output = []
-  if distance_type == "mahan":
+  raw_score = []
+  if distance_type == "mahal":
     print("Using mahanalobis distance...")
     for (mu, cov) in train_stats:
       mu, cov = torch.tensor(mu).double(), torch.tensor(cov).double()
@@ -238,6 +163,7 @@ def compute_dist(test_features, train_stats, distance_type='mahan', use_marginal
       neg_dist = - torch.einsum('nj, jk, nk -> n', delta, prec, delta)
       log_likelihood = (0.5 * neg_dist) + math.log((2 * math.pi) ** (-mu.shape[0] / 2))
       output.append(log_likelihood.unsqueeze(-1))
+      raw_score.append(-neg_dist.unsqueeze(-1))
   elif distance_type == "euclidean":
     print("Using euclidean distance...")
     for (mu, cov) in train_stats:
@@ -246,11 +172,15 @@ def compute_dist(test_features, train_stats, distance_type='mahan', use_marginal
       neg_dist = - torch.norm(delta, p=2, dim=1)**2
       log_likelihood = (0.5 * neg_dist) + math.log((2*math.pi)**(-mu.shape[0]/2))
       output.append(log_likelihood.unsqueeze(-1))
+      raw_score.append(-neg_dist.unsqueeze(-1))
 
   output = torch.cat(output, dim=1)
-  confidence, conf_indices = torch.max(output, dim=1) # Takes the max of class conditional probability
+  raw_score = torch.cat(raw_score, dim=-1)
+  confidence, conf_indices = torch.max(output, dim=1) #Takes the max of class conditional probability
   if use_marginal:
-    confidence = torch.log(torch.sum(torch.exp(output), dim=1)) # Takes the marginal probability
+    # confidence = torch.log(torch.sum(torch.exp(output), dim=1)) # Takes the marginal probability
+    score = torch.sum(raw_score, dim=-1)
+    return score, conf_indices, output
   return confidence, conf_indices, output
 
 

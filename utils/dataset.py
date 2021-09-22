@@ -313,7 +313,7 @@ def split_csv_to_testval(dir_name, val_ratio, seed=0):
         flag = True
       if "test" in file or "val" in file:
         flag = False
-        # break
+        break
     if flag:
       csv_dir.append(root)
 

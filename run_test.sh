@@ -1,10 +1,11 @@
 export CUDA_VISIBLE_DEVICES=0,1
-DATASET="imdb"
 MODEL=("bert" "roberta")
-TARGET_MODEL=("textattack/bert-base-uncased-$DATASET" "textattack/roberta-base-$DATASET")
+DATASET="imdb"
+MODEL_DATASET="imdb"
+TARGET_MODEL=("textattack/bert-base-uncased-$MODEL_DATASET" "textattack/roberta-base-$MODEL_DATASET")
 RECIPE="pwws textfooler bae tf-adj"
-EXP_NAME="euclidean"
-PARAM_PATH="params/cosine_sim-include.json"
+EXP_NAME="tmp"
+PARAM_PATH="params/reduce_dim_false.json"
 SEED_START=0
 SEED_END=2
 GPU=1
@@ -17,7 +18,7 @@ do
   do
     for seed in $(seq $SEED_START $SEED_END)
     do
-      python main_baseline.py --dataset $DATASET\
+      python main.py --dataset $DATASET\
       --test_adv attack-log/$DATASET/${MODEL[i]}/$recipe/test.csv\
       --val_adv attack-log/$DATASET/${MODEL[i]}/$recipe/test.csv\
       --attack_type $recipe\

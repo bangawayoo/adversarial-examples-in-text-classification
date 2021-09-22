@@ -5,6 +5,7 @@ import pdb
 import torch
 from textattack import attack_recipes
 from sklearn.decomposition import KernelPCA, PCA
+from sklearn.kernel_approximation import RBFSampler
 from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis as QDA
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
 from sklearn import random_projection
@@ -82,49 +83,44 @@ if __name__ == "__main__":
   trainvalset, _, key = get_dataset(args)
   text_key, testset_key = key
   trainset, _ = split_dataset(trainvalset, split='trainval', split_ratio=1.0)
-  train_features = get_train_features(model_wrapper, args, batch_size=256, dataset=trainset, text_key=text_key, layer=params['layer_param']['cls_layer'])
+  feats = get_train_features(model_wrapper, args, batch_size=256, dataset=trainset, text_key=text_key, layer=params['layer_param']['cls_layer'])
 
-  feats = []
-  for cls, x in enumerate(train_features):
-      data = torch.cat(x, dim=0)
-      cls_vector = torch.tensor(cls).repeat(data.shape[0], 1)
-      feats.append(torch.cat([data, cls_vector], dim=1))
-
-  feats = torch.cat(feats, dim=0)
-
-  if params['']:
-    SAMPLE = True
-    if SAMPLE:
+  if params['reduce_dim']['do']:
+    if params['sample']:
       torch.manual_seed(0)
-      num_sample = {"imdb": 3000, "ag-news": 4000, "sst2": 8000}
+      num_sample = {"imdb": 3000, "ag-news": 4000, "sst2": 3000}
       sample_idx = torch.randperm(len(feats))[:num_sample[args.dataset]]
       sampled_feats = feats[sample_idx, :-1].numpy()
       labels = feats[sample_idx, -1].numpy()
 
-    # reducer = LDA()
-    # reduced_feat = reducer.fit_transform(sampled_feats, labels)
-    # reducer = random_projection.GaussianRandomProjection(eps=0.5)
-    # reduced_feat = reducer.fit_transform(sampled_feats)
-    reducer = KernelPCA(n_components=50, kernel='rbf', random_state=0)
-    reduced_feat = reducer.fit_transform(sampled_feats)
+    if params['reduce_dim']['method'] == "PCA":
+      reducer = KernelPCA(n_components=params['reduce_dim']['dim'], kernel=params['reduce_dim']['kernel'], random_state=0)
+      # reducer = PCA(n_components=params['reduce_dim']['dim'], random_state=0)
+      # from sklearn.preprocessing import StandardScaler
+      # scaler = StandardScaler()
+      # sampled_feats = scaler.fit_transform(sampled_feats)
+      scaler = None
+      reduced_feat = reducer.fit_transform(sampled_feats)
+    elif params['reduce_dim']['method'] == 'RF':
+      scaler = None
+      reducer = RBFSampler(gamma=1, n_components=params['reduce_dim']['dim'], random_state=1)
+      reduced_feat = reducer.fit_transform(sampled_feats)
+    else:
+      assert False, "Not implemented yet. Check json"
   else:
       reducer = None
+      scaler = None
       reduced_feat = feats[:, :-1].numpy()
       labels = feats[:, -1].numpy()
 
-  train_stats = get_stats(reduced_feat, labels, use_shared_cov=False)
-
-  k_s = list(map(lambda x: float(x), args.k_tune_range.split()))
-  tune_params = {'topk': {'start':k_s[0], 'end':k_s[1], 'step':k_s[2]}}
-  detector = Detector(tune_params, model_wrapper, args.val_adv, train_stats, logger, params, reducer, dataset=args.dataset , seed=args.seed)
+  train_stats = get_stats(reduced_feat, labels, use_shared_cov=params['shared_cov'])
+  detector = Detector(model_wrapper, args.val_adv, train_stats, logger, params, (scaler, reducer), dataset=args.dataset , seed=args.seed)
   if args.baseline:
     pass
     # detector.test_baseline_PPL(args.test_adv, args.fpr_threshold)
     # detector.test_comb(args.test_adv, args.fpr_threshold)
     # detector.test_baseline(args.test_adv, args.fpr_threshold)
   else:
-    if args.tune_params:
-      detector.grid_search(fpr_thres=args.fpr_threshold, tune_params=args.tune_params)
     roc, auc, tpr_at_fpr, naive_tpr, conf, testset = detector.test(args.test_adv, args.fpr_threshold)
 
   if args.compute_bootstrap:
