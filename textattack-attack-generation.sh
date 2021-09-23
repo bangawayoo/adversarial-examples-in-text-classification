@@ -1,29 +1,28 @@
 #!/bin/bash
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=0
 DATASET="imdb"
-RECIPE="faster-alzantot"
-MODEL="roberta-base-${DATASET}"
+RECIPE="textattack pwws bae"
+MODEL="bert-base-uncased-${DATASET}"
 for recipe in $RECIPE
 do
   for model in $MODEL
   do
-    LOG_FILE_NAME="${model}_${recipe}"
-    textattack attack --model $model --num-examples 100 --log-to-csv "attack-log/$DATASET/$LOG_FILE_NAME.csv" --model-batch-size 256 --recipe $recipe \
-     --num-workers-per-device 16\
+    LOG_FILE_NAME="${model}_${recipe}_neg"
+    textattack attack --model $model --num-examples 5000 --checkpoint-interval 2500 --log-to-csv "attack-log/$DATASET/$LOG_FILE_NAME.csv" --model-batch-size 256 --recipe $recipe \
+     --num-workers-per-device 16 --filter-by-labels 0\
      2>&1 | tee "attack-log/$DATASET/$LOG_FILE_NAME.txt"
   done
 done
 
 
-#RECIPE="tf-adj"
-#for recipe in $RECIPE
-#do
-#  for model in $MODEL
-#  do
-#     LOG_FILE_NAME="${model}_${recipe}"
-#    textattack attack --model $model --num-examples 1821 --attack-from-file recipes/textfooler_jin_2019_adjusted.py \
-#    --log-to-csv "attack-log/$DATASET/$LOG_FILE_NAME.csv" --dataset-from-file sst2_dataset.py --model-batch-size 64\
-#     --num-workers-per-device 16\
-#     2>&1 | tee "attack-log/$DATASET/$LOG_FILE_NAME.txt"
-#  done
-#done
+RECIPE="tf-adj"
+for recipe in $RECIPE
+do
+  for model in $MODEL
+  do
+     LOG_FILE_NAME="${model}_${recipe}_neg"
+    textattack attack --model $model --num-examples 5000 --checkpoint-interval 2500 --log-to-csv "attack-log/$DATASET/$LOG_FILE_NAME.csv" --model-batch-size 256 --recipe $recipe \
+     --num-workers-per-device 16 --filter-by-labels 0\ --attack-from-file recipes/textfooler_jin_2019_adjusted.py\
+     2>&1 | tee "attack-log/$DATASET/$LOG_FILE_NAME.txt"
+  done
+done

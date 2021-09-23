@@ -43,6 +43,7 @@ class Detector():
   def test(self, test_data_path, fpr_thres):
     testset = self.get_data(test_data_path, max_adv_num=self.max_adv_num)
     texts = testset['text'].tolist()
+    gt = torch.tensor(testset['ground_truth_output'].tolist())
     # import random
     # random.seed(0)
     # random.shuffle(texts)
@@ -51,7 +52,7 @@ class Detector():
     # random.shuffle(label)
     # testset['result_type'] = label
 
-    test_features = get_test_features(self.model_wrapper, batch_size=self.batch_size, dataset=texts, params=self.params,
+    test_features, preds = get_test_features(self.model_wrapper, batch_size=self.batch_size, dataset=texts, params=self.params,
                                              logger=self.logger)
     if self.dim_reducer:
       test_features = test_features.numpy()
@@ -62,6 +63,9 @@ class Detector():
     confidence, conf_indices, distance = compute_dist(test_features, self.stats, distance_type="euclidean",
                                                       use_marginal=False)
 
+    # confidence = distance[torch.arange(preds.numel()), preds]
+
+    pdb.set_trace()
     num_nans = sum(confidence == -float("Inf"))
     if num_nans != 0:
       self.logger.log.info(f"Warning : {num_nans} Nans in confidence")
@@ -75,6 +79,8 @@ class Detector():
     self.logger.log.info("-----Results for Mahal. OOD------")
     confidence, conf_indices, distance = compute_dist(test_features, self.stats, distance_type="mahal",
                                                       use_marginal=False)
+    # confidence = distance[torch.arange(preds.numel()), preds]
+
     num_nans = sum(confidence == -float("Inf"))
     if num_nans != 0:
       self.logger.log.info(f"Warning : {num_nans} Nans in confidence")

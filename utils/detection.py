@@ -109,6 +109,7 @@ def get_test_features(model_wrapper, batch_size, dataset, params, logger=None):
   num_samples = len(dataset)
   num_batches = int((num_samples // batch_size) + 1)
   features = []
+  preds = []
   layer = params['layer_param']['cls_layer']
 
   with torch.no_grad():
@@ -119,9 +120,11 @@ def get_test_features(model_wrapper, batch_size, dataset, params, logger=None):
       if len(examples) == 0:
         continue
       output = model_wrapper.inference(examples, output_hs=True, output_attention=True)
+      _, pred = torch.max(output.logits, dim=1)
       feat = output.hidden_states[layer][:, 0,:].cpu()  # output.hidden_states : (Batch_size, sequence_length, hidden_dim)
       features.append(feat.cpu())
-  return torch.cat(features, dim=0)
+      preds.append(pred.cpu())
+  return torch.cat(features, dim=0), torch.cat(preds, dim=0)
 
 
 def get_softmax(model_wrapper, batch_size, dataset, logger=None):
