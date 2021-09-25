@@ -153,20 +153,27 @@ def get_softmax(model_wrapper, batch_size, dataset, logger=None):
   return torch.cat(probs, dim=0), torch.cat(negative_entropy, dim=0)
 
 
-def compute_dist(test_features, train_stats, distance_type='mahan', use_marginal=True):
+def compute_dist(test_features, train_stats, distance_type='mahal', diagonal_cov=False, regularized_cov=False, use_marginal=True):
   # stats is list of np.array ; change to torch operations for gradient update
   output = []
   raw_score = []
   if distance_type == "mahal":
-    print("Using mahanalobis distance...")
+    print("Using mahalanobis distance...")
     for (mu, cov) in train_stats:
       mu, cov = torch.tensor(mu).double(), torch.tensor(cov).double()
+      if diagonal_cov:
+        diag_cov = torch.diag(cov)
+        cov = torch.diag(diag_cov)
+      if regularized_cov:
+        weight = torch.diag(cov).mean()
+        weight = 1
+        cov = cov + weight * torch.diag(torch.ones(cov.shape[0]))
       prec = torch.inverse(cov)
       delta = test_features-mu
       neg_dist = - torch.einsum('nj, jk, nk -> n', delta, prec, delta)
       log_likelihood = (0.5 * neg_dist) + math.log((2 * math.pi) ** (-mu.shape[0] / 2))
       output.append(log_likelihood.unsqueeze(-1))
-      raw_score.append(-neg_dist.unsqueeze(-1))
+      raw_score.append(neg_dist.unsqueeze(-1))
   elif distance_type == "euclidean":
     print("Using euclidean distance...")
     for (mu, cov) in train_stats:
@@ -175,9 +182,9 @@ def compute_dist(test_features, train_stats, distance_type='mahan', use_marginal
       neg_dist = - torch.norm(delta, p=2, dim=1)**2
       log_likelihood = (0.5 * neg_dist) + math.log((2*math.pi)**(-mu.shape[0]/2))
       output.append(log_likelihood.unsqueeze(-1))
-      raw_score.append(-neg_dist.unsqueeze(-1))
+      raw_score.append(neg_dist.unsqueeze(-1))
 
-  output = torch.cat(output, dim=1)
+  output = torch.cat(output, dim=-1)
   raw_score = torch.cat(raw_score, dim=-1)
   confidence, conf_indices = torch.max(output, dim=1) #Takes the max of class conditional probability
   if use_marginal:

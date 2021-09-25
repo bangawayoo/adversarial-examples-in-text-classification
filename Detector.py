@@ -65,7 +65,6 @@ class Detector():
 
     # confidence = distance[torch.arange(preds.numel()), preds]
 
-    pdb.set_trace()
     num_nans = sum(confidence == -float("Inf"))
     if num_nans != 0:
       self.logger.log.info(f"Warning : {num_nans} Nans in confidence")

@@ -1,14 +1,8 @@
 import argparse
 import json
 import pdb
-
 import torch
-from textattack import attack_recipes
-from sklearn.decomposition import KernelPCA, PCA
-from sklearn.kernel_approximation import RBFSampler
-from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis as QDA
-from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
-from sklearn import random_projection
+
 
 parser = argparse.ArgumentParser(description="Detect and defense attacked samples")
 
@@ -31,10 +25,7 @@ parser.add_argument("--exp_name", default='tmp', type=str,
 parser.add_argument("--fpr_threshold", default=0.10)
 parser.add_argument("--compute_bootstrap", default=False, action="store_true")
 parser.add_argument("--baseline", default=False, action="store_true")
-# parser.add_argument("--split_ratio", default=1.0)
 
-parser.add_argument("--k_tune_range", type=str, default="0 200 5",
-                    help="Three int values indicating <start k> <end k> <step>")
 parser.add_argument("--tune_params", default=False, action="store_true",
                     help="Whether to use the found best_params.pkl if it exists")
 parser.add_argument("--model_params_path", type=str, default="params/attention_key-exclude.json",
@@ -48,6 +39,12 @@ parser.add_argument("--mnli_option", default="matched", type=str,
 
 args, _ = parser.parse_known_args()
 
+from textattack import attack_recipes
+from sklearn.decomposition import KernelPCA, PCA
+from sklearn.kernel_approximation import RBFSampler
+from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis as QDA
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
+from sklearn import random_projection
 
 from utils.detection import *
 from utils.dataset import *
@@ -56,7 +53,6 @@ from utils.miscellaneous import *
 from models.wrapper import BertWrapper
 from Detector import Detector
 
-#List of hyper-parameters
 model_type = args.target_model.replace("/","-")
 assert args.attack_type in args.test_adv, f"Attack Type Error: Check if {args.test_adv} is based on {args.attack_type} method"
 if args.exp_name:
