@@ -7,11 +7,12 @@ from utils.dataset import *
 from utils.miscellaneous import *
 
 class Detector():
-  def __init__(self, model_wrapper, val_data_path, train_stats,
+  def __init__(self, model_wrapper, val_data_path, train_stats, loader,
                logger, params, dim_reducer, dataset=None, seed=0):
     #TODO: max_adv_num should be given as an argumnet depending on the dataset
     self.max_adv_num_dict = {'imdb':2000, 'ag-news':2000, 'sst2':1000}
     self.max_adv_num = self.max_adv_num_dict[dataset]
+    self.loader = loader
     self.params = params
     self.model_wrapper = model_wrapper
     self.logger = logger
@@ -26,14 +27,12 @@ class Detector():
 
   def get_data(self, val_data_path, max_adv_num):
     # max_adv_num : number of maximum adversarial samples to be tested
-    # If not possible, this is decremented by 100 until possible
+    # If not possible, this is decremented by 100 until it becomes possible
     if val_data_path.endswith(".csv"):
-      dataset, _ = read_testset_from_csv(val_data_path, use_original=False,
-                                                   split_type='random_sample', seed=self.seed, max_adv_num=max_adv_num,
-                                         batch_size=128, model_wrapper=None, logger=self.logger)
+      dataset, _ = self.loader.get_attack_from_csv(split_type='random_sample', max_adv_num=max_adv_num,
+                                         batch_size=128, model_wrapper=None)
     elif val_data_path.endswith(".pkl"):
-      dataset = read_testset_from_pkl(val_data_path, self.model_wrapper,
-                                      batch_size=128, logger=self.logger)
+      dataset = self.loader.get_attack_from_pkl(val_data_path, self.model_wrapper, batch_size=128)
 
     adv_count = dataset.result_type.value_counts()[1]
     total = len(dataset)

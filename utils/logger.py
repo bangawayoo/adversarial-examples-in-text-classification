@@ -8,18 +8,21 @@ import csv
 import os
 
 class Logger:
-    def __init__(self, log_path, seed):
+    def __init__(self, log_path):
         for handler in logging.root.handlers[:]:
             logging.root.removeHandler(handler)
         logging.basicConfig(filename=f"{log_path}/out.log", level=logging.INFO, filemode="a")
         streamHandler = logging.StreamHandler(sys.stdout)
         self.log = logging.getLogger('log')
         self.log.addHandler(streamHandler)
-        self.log.info(f"Seed={seed}")
         self.log_path = log_path
-        self.seed=seed
+        self.seed = None
         self.metric = {}
         self.metric_names = ['tpr', 'fpr', 'f1', 'auc', 'topk', 'naive_tpr']
+
+    def set_seed(self, seed):
+        self.log.info(f"Seed={seed}")
+        self.seed = seed
 
     def log_metric(self, metric_dict):
         for key, value in metric_dict.items():

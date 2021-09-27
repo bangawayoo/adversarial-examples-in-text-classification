@@ -11,8 +11,11 @@ parser.add_argument("--dataset", default="imdb", type=str,
                     help="classification dataset to use")
 parser.add_argument("--preprocess", default="standard", type=str,
                     choices=["standard", "fgws"])
+parser.add_argument("--data_type", default="standard", type=str,
+                    choices=["standard", "fgws"])
 parser.add_argument("--target_model", default="textattack/bert-base-uncased-imdb", type=str, #textattack/roberta-base-SST-2
-                    help="type of model (textattack pretrained model, path to ckpt)")
+                    help="name of model (textattack pretrained model, path to ckpt)")
+parser.add_argument("--model_type", type=str, help="model type (e.g. bert, roberta, cnn)")
 parser.add_argument("--test_adv", default="attack-log/imdb/bert/textfooler/test.csv", type=str,
                     help="perturbed texts files with extension csv or pkl")
 parser.add_argument("--val_adv", default="attack-log/imdb/bert/textfooler/test.csv", type=str,
@@ -32,7 +35,8 @@ parser.add_argument("--model_params_path", type=str, default="params/attention_k
                     help="path to json file containing params about probability modeling")
 
 parser.add_argument("--gpu", default='0', type=str)
-parser.add_argument("--seed", default=0, type=int)
+parser.add_argument("--start_seed", default=0, type=int)
+parser.add_argument("--end_seed", default=0, type=int)
 parser.add_argument("--mnli_option", default="matched", type=str,
                     choices=["matched", "mismatched"],
                     help="use matched or mismatched test set for MNLI")
@@ -52,9 +56,10 @@ from utils.logger import *
 from utils.miscellaneous import *
 from models.wrapper import BertWrapper
 from Detector import Detector
+from AttackLoader import AttackLoader
 
 model_type = args.target_model.replace("/","-")
-assert args.attack_type in args.test_adv, f"Attack Type Error: Check if {args.test_adv} is based on {args.attack_type} method"
+# assert args.attack_type in args.test_adv, f"Attack Type Error: Check if {args.test_adv} is based on {args.attack_type} method"
 if args.exp_name:
   args.log_path = f"runs/{args.dataset}/{args.exp_name}/{model_type}/{args.attack_type}"
 else:
@@ -63,7 +68,7 @@ else:
 if __name__ == "__main__":
   if not os.path.isdir(args.log_path):
     os.makedirs(args.log_path)
-  logger = Logger(args.log_path, args.seed)
+  logger = Logger(args.log_path)
   logger.log.info("Args: "+str(args.__dict__))
 
   with open(args.model_params_path, "r") as r:
@@ -84,10 +89,13 @@ if __name__ == "__main__":
   if params['reduce_dim']['do']:
     if params['sample']:
       torch.manual_seed(0)
-      num_sample = {"imdb": 3000, "ag-news": 4000, "sst2": 3000}
+      num_sample = {"imdb": 3000, "ag-news": 4000, "sst2": 40000}
       sample_idx = torch.randperm(len(feats))[:num_sample[args.dataset]]
       sampled_feats = feats[sample_idx, :-1].numpy()
       labels = feats[sample_idx, -1].numpy()
+    else:
+      sampled_feats = feats[:, :-1].numpy()
+      labels = feats[:, -1].numpy()
 
     if params['reduce_dim']['method'] == "PCA":
       reducer = KernelPCA(n_components=params['reduce_dim']['dim'], kernel=params['reduce_dim']['kernel'], random_state=0)
@@ -110,22 +118,26 @@ if __name__ == "__main__":
       labels = feats[:, -1].numpy()
 
   train_stats = get_stats(reduced_feat, labels, use_shared_cov=params['shared_cov'])
-  detector = Detector(model_wrapper, args.val_adv, train_stats, logger, params, (scaler, reducer), dataset=args.dataset , seed=args.seed)
-  if args.baseline:
-    pass
-    # detector.test_baseline_PPL(args.test_adv, args.fpr_threshold)
-    # detector.test_comb(args.test_adv, args.fpr_threshold)
-    # detector.test_baseline(args.test_adv, args.fpr_threshold)
-  else:
-    roc, auc, tpr_at_fpr, naive_tpr, conf, testset = detector.test(args.test_adv, args.fpr_threshold)
 
-  if args.compute_bootstrap:
-    # Compute bootstrap scores
-    target = testset.result_type.values
-    scores = compute_bootstrap_score(conf, target, roc, args.fpr_threshold)
+  for s in range(args.start_seed, args.end_seed+1):
+    logger.set_seed(s)
+    loader = AttackLoader(args, logger, data_type=args.data_type)
+    detector = Detector(model_wrapper, args.val_adv, train_stats, loader, logger, params, (scaler, reducer), dataset=args.dataset , seed=s)
+    if args.baseline:
+      pass
+      # detector.test_baseline_PPL(args.test_adv, args.fpr_threshold)
+      # detector.test_comb(args.test_adv, args.fpr_threshold)
+      # detector.test_baseline(args.test_adv, args.fpr_threshold)
+    else:
+      roc, auc, tpr_at_fpr, naive_tpr, conf, testset = detector.test(args.test_adv, args.fpr_threshold)
 
-    logger.log.info("-----Bootstrapped Results-----")
-    for k, v in scores.items():
-      logger.log.info(f"{k}: {v:.4f}")
+    if args.compute_bootstrap:
+      # Compute bootstrap scores
+      target = testset.result_type.values
+      scores = compute_bootstrap_score(conf, target, roc, args.fpr_threshold)
+
+      logger.log.info("-----Bootstrapped Results-----")
+      for k, v in scores.items():
+        logger.log.info(f"{k}: {v:.4f}")
 
 
