@@ -1,5 +1,6 @@
 import os
 import glob
+import pdb
 import pickle
 
 import numpy as np
@@ -33,7 +34,7 @@ class AttackLoader():
       assert len(csv_files) == 1, f"{len(csv_files)} exists in {self.csv_dir}"
       self.csv_file = csv_files[0]
       self.seed = logger.seed
-      self.val_ratio = 0.3
+      self.val_ratio = 0.3 if args.dataset!="sst2" else 0.0
       self.split_csv_to_testval()
 
   def split_csv_to_testval(self):
@@ -45,7 +46,14 @@ class AttackLoader():
     split_point = int(num_samples*self.val_ratio)
 
     valset = df.iloc[indices[:split_point]]
-    if self.val_ratio == 0 :
+    if self.args.dataset == "sst2":
+      val_path = os.path.join(self.data_dir,"val")
+      csv_files = glob.glob(os.path.join(val_path, f"{self.args.model_type}*{self.args.attack_type}.csv"))
+      assert len(csv_files) == 1, f"{len(csv_files)} exists in validation path {csv_files}"
+      valset = pd.read_csv(csv_files[0])
+      val_path = os.path.join(self.cache_dir, "val.csv")
+      valset.to_csv(val_path)
+    elif self.val_ratio == 0 :
       print(f"Skipping validation set")
     else:
       val_path = os.path.join(self.cache_dir, "val.csv")
@@ -55,14 +63,14 @@ class AttackLoader():
     testset.to_csv(testpath)
     self.logger.log.info("test/val split saved in cache")
 
-  def get_attack_from_csv(self, batch_size=64,
+  def get_attack_from_csv(self, dtype='test', batch_size=64,
                           model_wrapper=None):
     def clean_text(t):
       t = t.replace("[", "")
       t = t.replace("]", "")
       return t
 
-    df = pd.read_csv(self.csv_file)
+    df = pd.read_csv(os.path.join(self.cache_dir, f"{dtype}.csv"))
     df.loc[df.result_type == 'Failed', 'result_type'] = 0
     df.loc[df.result_type == 'Successful', 'result_type'] = 1
     df.loc[df.result_type == 'Skipped', 'result_type'] = -1
@@ -82,23 +90,24 @@ class AttackLoader():
       (# of desired adv. samples / success rate of adv. attack) = (# of desired adv. samples / # of adv. samples) / (# of total samples) 
       
       split_ratio :  (# of desired adv. samples / # of adv. samples) = max_adv_num / num_adv 
-      max_adv_num is dataset dependent and decremented by 100 until attaining this is possible without causing clean/adv class imbalance
+      max_adv_num is dataset dependent and decremented by 10 until attaining this is possible without causing clean/adv class imbalance
       """
-      split_ratio = 1 # ratio to attain max_adv_num number of adv. samples (
-
       max_adv_num = self.max_adv_num
+      adv_sr = num_adv / num_samples
+      target_samples = max_adv_num * (1/adv_sr)
+      split_ratio = target_samples/num_samples      # ratio to attain max_adv_num number of adv. samples
       while split_ratio >= 0.6 and max_adv_num > 0:
         split_ratio = max_adv_num / num_adv
-        max_adv_num -= 100
+        max_adv_num -= 10
       if split_ratio >= 0.6 or max_adv_num < 0:
         raise Exception(
           f"Dataset is too small to sample enough adverserial samples. Total: {num_samples}, Adv.: {num_adv}")
 
       np.random.seed(self.seed)
 
-      if 'test.csv' in self.csv_file: dtype = 'test'
-      elif 'val.csv' in self.csv_file: dtype = 'val'
-      else: dtype = ''
+      # if 'test.csv' in self.csv_file: dtype = 'test'
+      # elif 'val.csv' in self.csv_file: dtype = 'val'
+      # else: dtype = ''
 
       rand_idx = np.arange(num_samples)
       np.random.shuffle(rand_idx)
