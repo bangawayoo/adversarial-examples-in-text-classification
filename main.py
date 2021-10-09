@@ -1,6 +1,8 @@
 import argparse
 import json
 import pdb
+
+import matplotlib.pyplot as plt
 import torch
 
 
@@ -16,9 +18,14 @@ parser.add_argument("--data_type", default="standard", type=str,
 parser.add_argument("--target_model", default="textattack/bert-base-uncased-imdb", type=str, #textattack/roberta-base-SST-2
                     help="name of model (textattack pretrained model, path to ckpt)")
 parser.add_argument("--model_type", type=str, help="model type (e.g. bert, roberta, cnn)")
-parser.add_argument("--test_adv", default="attack-log/imdb/bert/textfooler/test.csv", type=str,
+parser.add_argument("--scenario", type=str, help="scenario that determines how the configure the adv. dataset")
+parser.add_argument("--cov_estimator", type=str, help="covarianc esitmator",
+                    choices=["OAS", "MCD", "None"])
+
+
+parser.add_argument("--pkl_test_path", default=" ", type=str,
                     help="perturbed texts files with extension csv or pkl")
-parser.add_argument("--val_adv", default="attack-log/imdb/bert/textfooler/test.csv", type=str,
+parser.add_argument("--pkl_val_path", default=" ", type=str,
                     help="perturbed texts files with extension csv or pkl")
 parser.add_argument("--attack_type", default='textfooler', type=str,
                     help="attack type for logging")
@@ -46,6 +53,8 @@ args, _ = parser.parse_known_args()
 from textattack import attack_recipes
 from sklearn.decomposition import KernelPCA, PCA
 from sklearn.kernel_approximation import RBFSampler
+from sklearn.preprocessing import StandardScaler
+
 from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis as QDA
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
 from sklearn import random_projection
@@ -85,51 +94,36 @@ if __name__ == "__main__":
   text_key, testset_key = key
   trainset, _ = split_dataset(trainvalset, split='trainval', split_ratio=1.0)
   feats = get_train_features(model_wrapper, args, batch_size=256, dataset=trainset, text_key=text_key, layer=params['layer_param']['cls_layer'])
+  feats = feats.numpy()
+  reduced_feat, labels, reducer, scaler = preprocess_features(feats, params, args, logger)
 
-  if params['reduce_dim']['do']:
-    if params['sample']:
-      torch.manual_seed(0)
-      num_sample = {"imdb": 3000, "ag-news": 4000, "sst2": 40000}
-      sample_idx = torch.randperm(len(feats))[:num_sample[args.dataset]]
-      sampled_feats = feats[sample_idx, :-1].numpy()
-      labels = feats[sample_idx, -1].numpy()
-    else:
-      sampled_feats = feats[:, :-1].numpy()
-      labels = feats[:, -1].numpy()
+  train_stats, estimators = get_stats(reduced_feat, labels, cov_estim_name=args.cov_estimator, use_shared_cov=params['shared_cov'])
+  naive_train_stats, naive_estimators = get_stats(reduced_feat, labels, cov_estim_name="None", use_shared_cov=params['shared_cov'])
+  all_train_stats = [naive_train_stats, train_stats]
+  all_estimators = [naive_estimators, estimators]
 
-    if params['reduce_dim']['method'] == "PCA":
-      reducer = KernelPCA(n_components=params['reduce_dim']['dim'], kernel=params['reduce_dim']['kernel'], random_state=0)
-      # reducer = PCA(n_components=params['reduce_dim']['dim'], random_state=0)
-      # from sklearn.preprocessing import StandardScaler
-      # scaler = StandardScaler()
-      # sampled_feats = scaler.fit_transform(sampled_feats)
-      scaler = None
-      reduced_feat = reducer.fit_transform(sampled_feats)
-    elif params['reduce_dim']['method'] == 'RF':
-      scaler = None
-      reducer = RBFSampler(gamma=1, n_components=params['reduce_dim']['dim'], random_state=1)
-      reduced_feat = reducer.fit_transform(sampled_feats)
-    else:
-      assert False, "Not implemented yet. Check json"
-  else:
-      reducer = None
-      scaler = None
-      reduced_feat = feats[:, :-1].numpy()
-      labels = feats[:, -1].numpy()
-
-  train_stats = get_stats(reduced_feat, labels, use_shared_cov=params['shared_cov'])
+  visualize = False
+  if visualize:
+    for idx, (mu, cov) in enumerate(train_stats):
+      spectrum = np.linalg.eigvals(cov)
+      kappa = max(spectrum) / min(spectrum)
+      plt.matshow(cov)
+      plt.title(f"Cond.:{kappa:.3e} Max:{max(spectrum):.3e} Min: {min(spectrum):.3e}")
+      cb = plt.colorbar()
+      cb.ax.tick_params(labelsize=14)
+      plt.savefig(os.path.join(args.log_path, f"cls{idx}.png"))
 
   for s in range(args.start_seed, args.end_seed+1):
     logger.set_seed(s)
     loader = AttackLoader(args, logger, data_type=args.data_type)
-    detector = Detector(model_wrapper, args.val_adv, train_stats, loader, logger, params, (scaler, reducer), dataset=args.dataset , seed=s)
+    detector = Detector(model_wrapper, all_train_stats, loader, logger, params, (scaler, reducer, all_estimators, args.cov_estimator), dataset=args.dataset , seed=s)
     if args.baseline:
       pass
       # detector.test_baseline_PPL(args.test_adv, args.fpr_threshold)
       # detector.test_comb(args.test_adv, args.fpr_threshold)
       # detector.test_baseline(args.test_adv, args.fpr_threshold)
     else:
-      roc, auc, tpr_at_fpr, naive_tpr, conf, testset = detector.test(args.test_adv, args.fpr_threshold)
+      roc, auc, tpr_at_fpr, naive_tpr, conf, testset = detector.test(args.fpr_threshold, args.pkl_test_path)
 
     if args.compute_bootstrap:
       # Compute bootstrap scores

@@ -1,0 +1,6 @@
+{   "shared_cov":false,
+    "reduce_dim": {"do": true, "method": "PCA", "kernel": "linear", "dim": 100},
+    "sample": true,
+    "scaler": true,
+    "layer_param": {"cls_layer": -1, "num_layer": 1}
+}

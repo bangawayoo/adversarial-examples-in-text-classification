@@ -1,5 +1,0 @@
-{
-    "model_param": {"type": "cosine_sim", "normalization": "softmax", "temperature": 1.0,
-                    "attention_type": "", "exclude_cls_token": true},
-    "layer_param": {"cls_layer": -1, "num_layer": 1},
-    "prob_param": {"choose_type": "topk", "topk": 0, "sum_heads":true, "p": 0.0}}

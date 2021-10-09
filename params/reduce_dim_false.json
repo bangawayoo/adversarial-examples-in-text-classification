@@ -1,5 +1,6 @@
 {   "shared_cov":false,
     "reduce_dim": {"do": false, "method": "None", "kernel": "None"},
     "sample": false,
+    "scaler": false,
     "layer_param": {"cls_layer": -1, "num_layer": 1}
 }

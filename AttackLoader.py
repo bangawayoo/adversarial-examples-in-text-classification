@@ -7,10 +7,10 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 """
-called from main.py
-loads relevant csv file (attack,model,dataset)
-split into val, test csv and save it to cache
-random sample necessary file and split into sampled-test-seed{seed} , and save it to cache
+Loader class called from main.py
+ - loads relevant csv file (attack,model,dataset)
+ - split into val, test csv and save it to cache
+ - random sample necessary file and split into sampled-test-seed{seed} , and save it to cache
 """
 
 class AttackLoader():
@@ -20,6 +20,9 @@ class AttackLoader():
       os.mkdir(self.cache_dir)
 
     self.logger = logger
+    self.scenario = args.scenario
+    self.max_adv_num_dict = {'imdb':2000, 'ag-news':2000, 'sst2':1000}
+    self.max_adv_num = self.max_adv_num_dict[args.dataset]
 
     if data_type == "standard":
       self.root = "attack-log/"
@@ -27,7 +30,6 @@ class AttackLoader():
       self.model_dir = os.path.join(self.data_dir, args.model_type)
       self.csv_dir = os.path.join(self.model_dir, args.attack_type)
       csv_files = glob.glob(os.path.join(self.csv_dir,"*.csv"))
-      print(csv_files)
       assert len(csv_files) == 1, f"{len(csv_files)} exists in {self.csv_dir}"
       self.csv_file = csv_files[0]
       self.seed = logger.seed
@@ -53,7 +55,7 @@ class AttackLoader():
     testset.to_csv(testpath)
     self.logger.log.info("test/val split saved in cache")
 
-  def get_attack_from_csv(self, split_type='random_sample', max_adv_num=500, batch_size=64,
+  def get_attack_from_csv(self, batch_size=64,
                           model_wrapper=None):
     def clean_text(t):
       t = t.replace("[", "")
@@ -65,9 +67,9 @@ class AttackLoader():
     df.loc[df.result_type == 'Successful', 'result_type'] = 1
     df.loc[df.result_type == 'Skipped', 'result_type'] = -1
 
-    assert split_type in ['fgws', 'random_sample', 'control_sample', 'control_success',
-                          'attack_scenario'], "Check split type"
-    if split_type == 'random_sample':
+    assert self.scenario in ['fgws', 'random_sample', 'control_sample', 'control_success',
+                          's1', 's2'], "Check split type"
+    if self.scenario == 's1':
       num_samples = df.shape[0]
       num_adv = (df.result_type == 1).sum()
       """
@@ -84,6 +86,7 @@ class AttackLoader():
       """
       split_ratio = 1 # ratio to attain max_adv_num number of adv. samples (
 
+      max_adv_num = self.max_adv_num
       while split_ratio >= 0.6 and max_adv_num > 0:
         split_ratio = max_adv_num / num_adv
         max_adv_num -= 100
@@ -115,7 +118,7 @@ class AttackLoader():
       testset = pd.concat([adv, clean], axis=0)
       testset.to_csv(os.path.join(self.cache_dir, f'sampled-{dtype}-{self.seed}.csv'))
 
-    elif split_type in ['control_success', 'attack_scenario']:
+    elif self.scenario in ['control_success', 'attack_scenario']:
       assert "not implemented"
       attack_success = df.loc[df.result_type == 1][['perturbed_text', 'result_type', 'ground_truth_output']]
       attack_success = attack_success.rename(columns={'perturbed_text': 'text'})
@@ -124,18 +127,32 @@ class AttackLoader():
         attack_failed = df[['original_text', 'result_type']]
         attack_failed.loc[:, 'result_type'] = 0
       else:
-        text_type = 'perturbed_text' if split_type == 'attack_scenario' else 'original_text'
+        text_type = 'perturbed_text' if self.scenario == 'attack_scenario' else 'original_text'
         attack_failed = df.loc[df.result_type == 0][[text_type, 'result_type', 'ground_truth_output']]
       attack_failed = attack_failed.rename(columns={text_type: 'text'})
       testset = pd.concat([attack_failed, attack_success], axis=0)
 
-    elif split_type == 'fgws':
+    elif self.scenario == 'fgws':
       adv_samples = df.loc[df.result_type == 1][['perturbed_text', 'result_type', 'ground_truth_output']]
       adv_samples['result_type'] = 1
+      # max_adv_num = min(max_adv_num, len(adv_samples))
+      # adv_samples = adv_samples.iloc[:max_adv_num]
       adv_samples = adv_samples.rename(columns={'perturbed_text': 'text'})
       # clean_samples = df.loc[df.result_type != -1][['original_text', 'result_type', 'ground_truth_output']]
       clean_samples = df[
         ['original_text', 'result_type', 'ground_truth_output']]  # Take all samples (correct and incorrect)
+      clean_samples['result_type'] = 0
+      clean_samples = clean_samples.rename(columns={'original_text': 'text'})
+      testset = pd.concat([clean_samples, adv_samples], axis=0)
+
+    elif self.scenario == 's2':
+      adv_samples = df.loc[df.result_type == 1][['perturbed_text', 'result_type', 'ground_truth_output']]
+      adv_samples['result_type'] = 1
+      max_adv_num = min(self.max_adv_num, len(adv_samples))
+      adv_samples = adv_samples.iloc[:max_adv_num]
+      adv_samples = adv_samples.rename(columns={'perturbed_text': 'text'})
+      clean_samples = df.loc[df.result_type ==1][['original_text', 'result_type', 'ground_truth_output']]  # Take all samples (correct and incorrect)
+      clean_samples = clean_samples.iloc[:max_adv_num]
       clean_samples['result_type'] = 0
       clean_samples = clean_samples.rename(columns={'original_text': 'text'})
       testset = pd.concat([clean_samples, adv_samples], axis=0)

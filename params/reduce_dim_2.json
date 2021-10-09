@@ -1,5 +1,5 @@
 {   "shared_cov":false,
     "reduce_dim": {"do": true, "method": "PCA", "kernel": "rbf", "dim": 2},
-    "sample": false,
+    "sample": true,
     "layer_param": {"cls_layer": -1, "num_layer": 1}
 }

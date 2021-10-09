@@ -16,14 +16,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import roc_curve, precision_recall_curve, precision_recall_fscore_support, auc
+from sklearn.covariance import LedoitWolf, MinCovDet, GraphicalLasso, OAS
 
-from utils.miscellaneous import save_pkl, load_pkl
+from utils.miscellaneous import save_pkl, load_pkl, return_cov_estimator
 
 
 # Forward using train data to get empirical mean and covariance
-def get_stats(features, labels, use_shared_cov=False):
+def get_stats(features, labels, cov_estim_name=None, use_shared_cov=False):
   # Compute mean and covariance of each cls.
   stats = []
+  estimators = []
   label_list = range(len(np.unique(labels)))
 
   if use_shared_cov :
@@ -44,15 +46,18 @@ def get_stats(features, labels, use_shared_cov=False):
       stats[idx][1] = shared_cov
 
     return stats
-  else:
+  else: #Estimate covariance per class
     for idx, lab in enumerate(label_list):
+      cov_estim = return_cov_estimator(cov_estim_name)
       feat = features[labels==lab]
       mu = feat.mean(axis=0)
-      cov = np.cov(feat.T)
+      if cov_estim:
+        cov = cov_estim.fit(feat).covariance_
+        estimators.append(cov_estim)
+      else:
+        cov = np.cov(feat, rowvar=False)
       stats.append([mu, cov])
-
-
-  return stats
+  return stats, estimators
 
 
 def get_train_features(model_wrapper, args, batch_size, dataset, text_key, layer=-1):

@@ -1,5 +1,0 @@
-{
-    "model_param": {"type": "attention", "normalization": "", "temperature": false,
-                    "attention_type": "key", "exclude_cls_token": false},
-    "layer_param": {"cls_layer": -1, "num_layer": 1},
-    "prob_param": {"choose_type": "threshold", "topk": 10, "sum_heads":true, "p": 0.5, "ratio": 0}}
