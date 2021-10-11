@@ -24,6 +24,7 @@ class AttackLoader():
     self.scenario = args.scenario
     self.max_adv_num_dict = {'imdb':2000, 'ag-news':2000, 'sst2':1000}
     self.max_adv_num = self.max_adv_num_dict[args.dataset]
+    self.args = args
 
     if data_type == "standard":
       self.root = "attack-log/"
