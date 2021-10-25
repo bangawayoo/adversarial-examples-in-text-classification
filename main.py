@@ -1,8 +1,11 @@
 import argparse
 import json
+import os.path
+import shutil
 import pdb
 
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 
 
@@ -19,6 +22,7 @@ parser.add_argument("--target_model", default="textattack/bert-base-uncased-imdb
                     help="name of model (textattack pretrained model, path to ckpt)")
 parser.add_argument("--model_type", type=str, help="model type (e.g. bert, roberta, cnn)")
 parser.add_argument("--scenario", type=str, help="scenario that determines how the configure the adv. dataset")
+parser.add_argument("--use_val", default=False, action='store_true')
 parser.add_argument("--cov_estimator", type=str, help="covarianc esitmator",
                     choices=["OAS", "MCD", "None"])
 
@@ -51,13 +55,6 @@ parser.add_argument("--mnli_option", default="matched", type=str,
 args, _ = parser.parse_known_args()
 
 from textattack import attack_recipes
-from sklearn.decomposition import KernelPCA, PCA
-from sklearn.kernel_approximation import RBFSampler
-from sklearn.preprocessing import StandardScaler
-
-from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis as QDA
-from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
-from sklearn import random_projection
 
 from utils.detection import *
 from utils.dataset import *
@@ -82,6 +79,8 @@ if __name__ == "__main__":
 
   with open(args.model_params_path, "r") as r:
     params = json.load(r)
+  num_params = len(glob.glob(os.path.join(args.log_path, "*.json")))
+  shutil.copyfile(args.model_params_path, os.path.join(args.log_path, f"params-{num_params}.json"))
   logger.log.info("Using params...")
   logger.log.info(params)
 
@@ -97,31 +96,42 @@ if __name__ == "__main__":
   feats = feats.numpy()
   reduced_feat, labels, reducer, scaler = preprocess_features(feats, params, args, logger)
 
-  train_stats, estimators = get_stats(reduced_feat, labels, cov_estim_name=args.cov_estimator, use_shared_cov=params['shared_cov'])
+  train_stats, estimators = get_stats(reduced_feat, labels, cov_estim_name=args.cov_estimator, use_shared_cov=params['shared_cov'], params=params)
   naive_train_stats, naive_estimators = get_stats(reduced_feat, labels, cov_estim_name="None", use_shared_cov=params['shared_cov'])
   all_train_stats = [naive_train_stats, train_stats]
   all_estimators = [naive_estimators, estimators]
 
   visualize = False
   if visualize:
-    for idx, (mu, cov) in enumerate(train_stats):
-      spectrum = np.linalg.eigvals(cov)
-      kappa = max(spectrum) / min(spectrum)
-      plt.matshow(cov)
-      plt.title(f"Cond.:{kappa:.3e} Max:{max(spectrum):.3e} Min: {min(spectrum):.3e}")
-      cb = plt.colorbar()
-      cb.ax.tick_params(labelsize=14)
-      plt.savefig(os.path.join(args.log_path, f"cls{idx}.png"))
+    dir_name = os.path.dirname(args.log_path)
+    path_to_feat = os.path.join(dir_name, 'feats.txt')
+    feat_n_label = np.concatenate([reduced_feat, labels[:,np.newaxis]], axis=-1)
+    np.savetxt(path_to_feat, feat_n_label)
+    for cls_idx, mu_n_cov in enumerate(train_stats):
+      np.save(os.path.join(dir_name, f"cls{cls_idx}-cov.npy"), mu_n_cov[1])
+
+    for name, stat in zip(['naive', 'robust'], all_train_stats):
+      for idx, (mu, cov) in enumerate(stat):
+        spectrum = np.linalg.eigvals(cov)
+        path_to_csv = os.path.join(os.path.dirname(args.log_path), 'spectrum.csv')
+        with open(path_to_csv, 'a') as f:
+          wr = csv.writer(f)
+          wr.writerow([name, max(spectrum), min(spectrum)])
+        kappa = max(spectrum) / min(spectrum)
+        plt.matshow(cov)
+        plt.title(f"Cond.:{kappa:.3e} Max:{max(spectrum):.3e} Min: {min(spectrum):.3e}")
+        cb = plt.colorbar()
+        cb.ax.tick_params(labelsize=14)
+        plt.savefig(os.path.join(os.path.dirname(args.log_path), f"{name}-cls{idx}.png"))
+    exit()
 
   for s in range(args.start_seed, args.end_seed+1):
     logger.set_seed(s)
     loader = AttackLoader(args, logger, data_type=args.data_type)
-    detector = Detector(model_wrapper, all_train_stats, loader, logger, params, (scaler, reducer, all_estimators, args.cov_estimator), dataset=args.dataset , seed=s)
+    detector = Detector(model_wrapper, all_train_stats, loader, logger, params, (scaler, reducer, all_estimators, args.cov_estimator), use_val=args.use_val , dataset=args.dataset , seed=s)
     if args.baseline:
-      pass
-      # detector.test_baseline_PPL(args.test_adv, args.fpr_threshold)
-      # detector.test_comb(args.test_adv, args.fpr_threshold)
-      # detector.test_baseline(args.test_adv, args.fpr_threshold)
+      detector.test_baseline_PPL(args.fpr_threshold)
+      # detector.test_baseline(args.fpr_threshold)
     else:
       roc, auc, tpr_at_fpr, naive_tpr, conf, testset = detector.test(args.fpr_threshold, args.pkl_test_path)
 

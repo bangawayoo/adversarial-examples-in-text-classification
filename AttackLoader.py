@@ -17,9 +17,6 @@ Loader class called from main.py
 class AttackLoader():
   def __init__(self, args, logger, data_type="csv"):
     self.cache_dir = "attack-log/cache"
-    if not os.path.isdir(self.cache_dir):
-      os.mkdir(self.cache_dir)
-
     self.logger = logger
     self.scenario = args.scenario
     self.max_adv_num_dict = {'imdb':2000, 'ag-news':2000, 'sst2':1000}
@@ -36,6 +33,9 @@ class AttackLoader():
       self.csv_file = csv_files[0]
       self.seed = logger.seed
       self.val_ratio = 0.3 if args.dataset!="sst2" else 0.0
+      self.cache_dir = os.path.join(self.cache_dir, args.dataset, args.model_type, args.attack_type)
+      if not os.path.isdir(self.cache_dir):
+        os.makedirs(self.cache_dir)
       self.split_csv_to_testval()
 
   def split_csv_to_testval(self):
@@ -76,7 +76,7 @@ class AttackLoader():
     df.loc[df.result_type == 'Successful', 'result_type'] = 1
     df.loc[df.result_type == 'Skipped', 'result_type'] = -1
 
-    assert self.scenario in ['fgws', 'random_sample', 'control_sample', 'control_success',
+    assert self.scenario in ['random_sample', 'control_sample', 'control_success',
                           's1', 's2'], "Check split type"
     if self.scenario == 's1':
       num_samples = df.shape[0]
@@ -105,11 +105,6 @@ class AttackLoader():
           f"Dataset is too small to sample enough adverserial samples. Total: {num_samples}, Adv.: {num_adv}")
 
       np.random.seed(self.seed)
-
-      # if 'test.csv' in self.csv_file: dtype = 'test'
-      # elif 'val.csv' in self.csv_file: dtype = 'val'
-      # else: dtype = ''
-
       rand_idx = np.arange(num_samples)
       np.random.shuffle(rand_idx)
 
@@ -120,7 +115,7 @@ class AttackLoader():
       adv = adv.rename(columns={"perturbed_text": "text"})
       num_adv_samples = adv.shape[0]
 
-      other_split_idx = rand_idx[split_point:split_point + num_adv_samples]
+      other_split_idx = rand_idx[split_point:split_point + num_adv_samples] #Find equal number of clean samples
       other_split = df.iloc[other_split_idx].copy()
       clean = other_split  # Use correct and incorrect samples
       clean.loc[:, 'result_type'] = 0
@@ -128,41 +123,24 @@ class AttackLoader():
       testset = pd.concat([adv, clean], axis=0)
       testset.to_csv(os.path.join(self.cache_dir, f'sampled-{dtype}-{self.seed}.csv'))
 
-    elif self.scenario in ['control_success', 'attack_scenario']:
-      assert "not implemented"
-      attack_success = df.loc[df.result_type == 1][['perturbed_text', 'result_type', 'ground_truth_output']]
-      attack_success = attack_success.rename(columns={'perturbed_text': 'text'})
-      use_original = False
-      if use_original:
-        attack_failed = df[['original_text', 'result_type']]
-        attack_failed.loc[:, 'result_type'] = 0
-      else:
-        text_type = 'perturbed_text' if self.scenario == 'attack_scenario' else 'original_text'
-        attack_failed = df.loc[df.result_type == 0][[text_type, 'result_type', 'ground_truth_output']]
-      attack_failed = attack_failed.rename(columns={text_type: 'text'})
-      testset = pd.concat([attack_failed, attack_success], axis=0)
-
-    elif self.scenario == 'fgws':
-      adv_samples = df.loc[df.result_type == 1][['perturbed_text', 'result_type', 'ground_truth_output']]
-      adv_samples['result_type'] = 1
-      # max_adv_num = min(max_adv_num, len(adv_samples))
-      # adv_samples = adv_samples.iloc[:max_adv_num]
-      adv_samples = adv_samples.rename(columns={'perturbed_text': 'text'})
-      # clean_samples = df.loc[df.result_type != -1][['original_text', 'result_type', 'ground_truth_output']]
-      clean_samples = df[
-        ['original_text', 'result_type', 'ground_truth_output']]  # Take all samples (correct and incorrect)
-      clean_samples['result_type'] = 0
-      clean_samples = clean_samples.rename(columns={'original_text': 'text'})
-      testset = pd.concat([clean_samples, adv_samples], axis=0)
-
     elif self.scenario == 's2':
-      adv_samples = df.loc[df.result_type == 1][['perturbed_text', 'result_type', 'ground_truth_output']]
-      adv_samples['result_type'] = 1
-      max_adv_num = min(self.max_adv_num, len(adv_samples))
-      adv_samples = adv_samples.iloc[:max_adv_num]
+      num_samples = df.shape[0]
+      num_adv = (df.result_type == 1).sum()
+      max_adv_num = self.max_adv_num
+      adv_sr = num_adv / num_samples
+
+      np.random.seed(self.seed)
+      rand_idx = np.arange(num_samples)
+      np.random.shuffle(rand_idx)
+
+      split_point = min(num_samples, int(max_adv_num / adv_sr))
+      split_idx = rand_idx[:split_point]
+      split = df.iloc[rand_idx[split_idx]]
+
+      adv_samples = split.copy()
+      adv_samples = adv_samples.loc[adv_samples.result_type == 1]
       adv_samples = adv_samples.rename(columns={'perturbed_text': 'text'})
-      clean_samples = df.loc[df.result_type ==1][['original_text', 'result_type', 'ground_truth_output']]  # Take all samples (correct and incorrect)
-      clean_samples = clean_samples.iloc[:max_adv_num]
+      clean_samples = split.copy()
       clean_samples['result_type'] = 0
       clean_samples = clean_samples.rename(columns={'original_text': 'text'})
       testset = pd.concat([clean_samples, adv_samples], axis=0)
@@ -170,6 +148,7 @@ class AttackLoader():
     if 'nli' in self.csv_file:  # For NLI dataset, only get the hypothesis, which is attacked
       df['original_text'] = df['original_text'].apply(lambda x: x.split('>>>>')[1])
       testset['text'] = testset['text'].apply(lambda x: x.split('>>>>')[1])
+
     df['original_text'] = df['original_text'].apply(clean_text)
     df['perturbed_text'] = df['perturbed_text'].apply(clean_text)
     testset['text'] = testset['text'].apply(clean_text)

@@ -125,11 +125,11 @@ def compute_bootstrap_score(confidence, target, roc, fpr_thres):
   return scores
 
 
-def return_cov_estimator(name):
+def return_cov_estimator(name, params):
   if name == 'OAS':
     return OAS()
   elif name == 'MCD':
-    return MinCovDet()
+    return MinCovDet(support_fraction=params['h'] if params['h'] else None)
   elif name == 'ledoit-wolf':
     return LedoitWolf()
   else:
@@ -138,37 +138,35 @@ def return_cov_estimator(name):
 
 def preprocess_features(feats, params, args, logger):
   scaler = StandardScaler() if params.get('scaler', None) else None
+  if params['sample']:
+    np.random.seed(0)
+    num_sample = {"imdb": 8000, "ag-news": 8000, "sst2": 8000}
+    sample_idx = np.random.choice(range(len(feats)), size=num_sample[args.dataset], replace=False)
+    sampled_feats = feats[sample_idx, :-1]
+    labels = feats[sample_idx, -1]
+  else:
+    sampled_feats = feats[:, :-1]
+    labels = feats[:, -1]
 
   if params['reduce_dim']['do']:
-    if params['sample']:
-      np.random.seed(0)
-      num_sample = {"imdb": 8000, "ag-news": 8000, "sst2": 8000}
-      sample_idx = np.random.choice(range(len(feats)), size=num_sample[args.dataset], replace=False)
-      sampled_feats = feats[sample_idx, :-1]
-      labels = feats[sample_idx, -1]
-    else:
-      sampled_feats = feats[:, :-1]
-      labels = feats[:, -1]
-
     if params['reduce_dim']['method'] == "PCA":
-      reduced_feat, reducer = return_PCA_features(sampled_feats, params, scaler, logger)
+      reduced_feat, reducer = return_PCA_features(sampled_feats, params, scaler, logger, seed=0)
     elif params['reduce_dim']['method'] == 'RF':
       scaler = None
-      reducer = RBFSampler(gamma=1, n_components=params['reduce_dim']['dim'], random_state=1)
+      reducer = RBFSampler(gamma=1, n_components=params['reduce_dim']['dim'], random_state=0)
       reduced_feat = reducer.fit_transform(sampled_feats)
     else:
       assert False, "Not implemented yet. Check json"
   else:
     reducer = None
-    reduced_feat = scaler.fit_transform(feats[:, :-1]) if scaler else feats[:, :-1]
-    labels = feats[:, -1]
+    reduced_feat = scaler.fit_transform(sampled_feats) if scaler else sampled_feats
 
   return reduced_feat, labels, reducer, scaler
 
-def return_PCA_features(feats, params, scaler, logger):
+def return_PCA_features(feats, params, scaler, logger, seed=0):
   if params['reduce_dim']['dim'] < 1:  # Determine number of components by explained variance
     tmp_reducer = KernelPCA(n_components=feats.shape[-1], gamma=(1 / feats.shape[-1]), \
-                            kernel=params['reduce_dim']['kernel'], random_state=0)
+                            kernel=params['reduce_dim']['kernel'], random_state=seed)
     if scaler:
       feats = scaler.fit_transform(feats)
     tmp_reducer.fit(feats)
@@ -177,10 +175,10 @@ def return_PCA_features(feats, params, scaler, logger):
     n_components = sum(ev_cumsum < params['reduce_dim']['dim'])
     logger.log.info(f"Using {n_components} components to explain {params['reduce_dim']['dim']}")
     reducer = KernelPCA(n_components=n_components, gamma=(1 / feats.shape[-1]), \
-                        kernel=params['reduce_dim']['kernel'], random_state=0)
+                        kernel=params['reduce_dim']['kernel'], random_state=seed)
   else:  # Choose number of components by fixed number
     reducer = KernelPCA(n_components=params['reduce_dim']['dim'], gamma=(1 / feats.shape[-1]), \
-                        kernel=params['reduce_dim']['kernel'], random_state=0)
+                        kernel=params['reduce_dim']['kernel'], random_state=seed)
     # reducer = PCA(n_components=0.9, random_state=0)
 
   if scaler:

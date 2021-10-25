@@ -22,7 +22,7 @@ from utils.miscellaneous import save_pkl, load_pkl, return_cov_estimator
 
 
 # Forward using train data to get empirical mean and covariance
-def get_stats(features, labels, cov_estim_name=None, use_shared_cov=False):
+def get_stats(features, labels, cov_estim_name=None, use_shared_cov=False, params=None):
   # Compute mean and covariance of each cls.
   stats = []
   estimators = []
@@ -48,7 +48,7 @@ def get_stats(features, labels, cov_estim_name=None, use_shared_cov=False):
     return stats
   else: #Estimate covariance per class
     for idx, lab in enumerate(label_list):
-      cov_estim = return_cov_estimator(cov_estim_name)
+      cov_estim = return_cov_estimator(cov_estim_name, params)
       feat = features[labels==lab]
       mu = feat.mean(axis=0)
       if cov_estim:
