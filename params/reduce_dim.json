@@ -1,7 +1,6 @@
 {   "shared_cov":false,
-    "reduce_dim": {"do": true, "method": "PCA", "kernel": "rbf", "dim": 10},
+    "reduce_dim": {"do": true, "method": "PCA", "kernel": "rbf", "dim": 100},
     "sample": true,
     "scaler": false,
-    "layer_param": {"cls_layer": -1, "num_layer": 1},
-    "h": 0.4
+    "layer_param": {"cls_layer": -1, "num_layer": 1}
 }

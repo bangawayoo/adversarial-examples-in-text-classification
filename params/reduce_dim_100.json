@@ -3,5 +3,5 @@
     "sample": true,
     "scaler": false,
     "layer_param": {"cls_layer": -1, "num_layer": 1},
-    "h": 0.4
+    "h": false
 }

@@ -15,7 +15,7 @@ Loader class called from main.py
 """
 
 class AttackLoader():
-  def __init__(self, args, logger, data_type="csv"):
+  def __init__(self, args, logger, data_type="standard"):
     self.cache_dir = "attack-log/cache"
     self.logger = logger
     self.scenario = args.scenario
@@ -76,31 +76,30 @@ class AttackLoader():
     df.loc[df.result_type == 'Successful', 'result_type'] = 1
     df.loc[df.result_type == 'Skipped', 'result_type'] = -1
 
-    assert self.scenario in ['random_sample', 'control_sample', 'control_success',
-                          's1', 's2'], "Check split type"
+    assert self.scenario in ['random_sample', 'control_sample', 'control_success', 's1', 's2'], "Check split type"
     if self.scenario == 's1':
       num_samples = df.shape[0]
       num_adv = (df.result_type == 1).sum()
       """
       Procedure: 
-       1. randomly sample N samples from testset and attain adverserial samples.
+       1. randomly sample N samples from testset and attain adversarial samples.
        2. from the remaining testset randomly sample clean samples (around N)  
       
-      How to Choose N: 
+      How to Choose N (target_sample): 
       number of random samples to take is determined by (# of desired adv. samples / success rate of adv. attack) 
-      (# of desired adv. samples / success rate of adv. attack) = (# of desired adv. samples / # of adv. samples) / (# of total samples) 
-      
-      split_ratio :  (# of desired adv. samples / # of adv. samples) = max_adv_num / num_adv 
+      N = (# of desired adv. samples / success rate of adv. attack) = (# of desired adv. samples / # of adv. samples) / (# of total samples) 
+      split_ratio : N/ # of total samples = (# of desired adv. samples / # of adv. samples) = max_adv_num / num_adv 
       max_adv_num is dataset dependent and decremented by 10 until attaining this is possible without causing clean/adv class imbalance
       """
       max_adv_num = self.max_adv_num
       adv_sr = num_adv / num_samples
-      target_samples = max_adv_num * (1/adv_sr)
+      task_acc = (df.result_type!=-1).sum() / num_samples
+      target_samples = max_adv_num * (1/adv_sr) * (1/task_acc)
       split_ratio = target_samples/num_samples      # ratio to attain max_adv_num number of adv. samples
-      while split_ratio >= 0.6 and max_adv_num > 0:
+      while split_ratio >= 0.4 and max_adv_num > 0:
         split_ratio = max_adv_num / num_adv
         max_adv_num -= 10
-      if split_ratio >= 0.6 or max_adv_num < 0:
+      if split_ratio >= 0.4 or max_adv_num < 0:
         raise Exception(
           f"Dataset is too small to sample enough adverserial samples. Total: {num_samples}, Adv.: {num_adv}")
 
@@ -110,8 +109,14 @@ class AttackLoader():
 
       split_point = int(num_samples * split_ratio)
       split_idx = rand_idx[:split_point]
-      split = df.iloc[rand_idx[split_idx]]
-      adv = split.loc[split.result_type == 1]
+      split = df.iloc[split_idx].copy()
+      if self.args.include_fae :
+        adv = split.loc[split.result_type!=-1]
+        adv.loc[:, 'result_type'] = 1
+      else:
+        adv = split.loc[split.result_type == 1]
+        if self.args.unbalanced:
+          pass
       adv = adv.rename(columns={"perturbed_text": "text"})
       num_adv_samples = adv.shape[0]
 
@@ -121,21 +126,21 @@ class AttackLoader():
       clean.loc[:, 'result_type'] = 0
       clean = clean.rename(columns={"original_text": "text"})
       testset = pd.concat([adv, clean], axis=0)
-      testset.to_csv(os.path.join(self.cache_dir, f'sampled-{dtype}-{self.seed}.csv'))
 
     elif self.scenario == 's2':
       num_samples = df.shape[0]
       num_adv = (df.result_type == 1).sum()
       max_adv_num = self.max_adv_num
       adv_sr = num_adv / num_samples
+      task_acc = (df.result_type != -1).sum() / num_samples
 
       np.random.seed(self.seed)
       rand_idx = np.arange(num_samples)
       np.random.shuffle(rand_idx)
 
-      split_point = min(num_samples, int(max_adv_num / adv_sr))
+      split_point = min(num_samples, int(max_adv_num / (adv_sr*task_acc)))
       split_idx = rand_idx[:split_point]
-      split = df.iloc[rand_idx[split_idx]]
+      split = df.iloc[split_idx]
 
       adv_samples = split.copy()
       adv_samples = adv_samples.loc[adv_samples.result_type == 1]
@@ -152,6 +157,7 @@ class AttackLoader():
     df['original_text'] = df['original_text'].apply(clean_text)
     df['perturbed_text'] = df['perturbed_text'].apply(clean_text)
     testset['text'] = testset['text'].apply(clean_text)
+    testset.to_csv(os.path.join(self.cache_dir, f'sampled-{dtype}-{self.seed}.csv'))
 
     if model_wrapper:
       self.__sanity_check(df, model_wrapper, batch_size)

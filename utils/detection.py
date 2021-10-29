@@ -46,7 +46,9 @@ def get_stats(features, labels, cov_estim_name=None, use_shared_cov=False, param
       stats[idx][1] = shared_cov
 
     return stats
-  else: #Estimate covariance per class
+
+  # Estimate covariance per class
+  else:
     for idx, lab in enumerate(label_list):
       cov_estim = return_cov_estimator(cov_estim_name, params)
       feat = features[labels==lab]
@@ -103,6 +105,8 @@ def get_train_features(model_wrapper, args, batch_size, dataset, text_key, layer
         for idx, lab in enumerate(label_list):
           features[idx].append(pooled_feat[y==lab])
 
+  if not os.path.exists("saved_feats/"):
+    os.mkdir('saved_feats')
   save_pkl(features, f"saved_feats/{model_name}.pkl")
 
   return features

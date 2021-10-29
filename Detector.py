@@ -120,7 +120,6 @@ class Detector():
     testset = self.get_data()
     texts = testset['text'].tolist()
     confidence = compute_ppl(texts)
-
     confidence[torch.isnan(confidence)] = 1e6
     confidence[confidence == -float("inf")] = -1e6
     metric_header = ["tpr", "fpr", "f1", "auc"]

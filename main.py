@@ -1,12 +1,7 @@
 import argparse
 import json
-import os.path
-import shutil
 import pdb
 
-import matplotlib.pyplot as plt
-import numpy as np
-import torch
 
 
 parser = argparse.ArgumentParser(description="Detect and defense attacked samples")
@@ -21,9 +16,12 @@ parser.add_argument("--data_type", default="standard", type=str,
 parser.add_argument("--target_model", default="textattack/bert-base-uncased-imdb", type=str, #textattack/roberta-base-SST-2
                     help="name of model (textattack pretrained model, path to ckpt)")
 parser.add_argument("--model_type", type=str, help="model type (e.g. bert, roberta, cnn)")
+
 parser.add_argument("--scenario", type=str, help="scenario that determines how the configure the adv. dataset")
+parser.add_argument("--include_fae", default=False, action='store_true', help="Include failed adversarial examples for detection as well")
+parser.add_argument("--unbalanced", default=False, type=str)
 parser.add_argument("--use_val", default=False, action='store_true')
-parser.add_argument("--cov_estimator", type=str, help="covarianc esitmator",
+parser.add_argument("--cov_estimator", type=str, help="covariance esitmator",
                     choices=["OAS", "MCD", "None"])
 
 
@@ -39,11 +37,14 @@ parser.add_argument("--exp_name", default='tmp', type=str,
 parser.add_argument("--fpr_threshold", default=0.10)
 parser.add_argument("--compute_bootstrap", default=False, action="store_true")
 parser.add_argument("--baseline", default=False, action="store_true")
+parser.add_argument("--visualize", default=False, action="store_true")
 
 parser.add_argument("--tune_params", default=False, action="store_true",
                     help="Whether to use the found best_params.pkl if it exists")
 parser.add_argument("--model_params_path", type=str, default="params/attention_key-exclude.json",
                     help="path to json file containing params about probability modeling")
+parser.add_argument("--PCA_dim", type=int, default=None)
+parser.add_argument("--MCD_h", type=float, default=None)
 
 parser.add_argument("--gpu", default='0', type=str)
 parser.add_argument("--start_seed", default=0, type=int)
@@ -54,7 +55,6 @@ parser.add_argument("--mnli_option", default="matched", type=str,
 
 args, _ = parser.parse_known_args()
 
-from textattack import attack_recipes
 
 from utils.detection import *
 from utils.dataset import *
@@ -65,7 +65,6 @@ from Detector import Detector
 from AttackLoader import AttackLoader
 
 model_type = args.target_model.replace("/","-")
-# assert args.attack_type in args.test_adv, f"Attack Type Error: Check if {args.test_adv} is based on {args.attack_type} method"
 if args.exp_name:
   args.log_path = f"runs/{args.dataset}/{args.exp_name}/{model_type}/{args.attack_type}"
 else:
@@ -79,8 +78,12 @@ if __name__ == "__main__":
 
   with open(args.model_params_path, "r") as r:
     params = json.load(r)
+  if args.PCA_dim:
+    params['reduce_dim']['dim'] = args.PCA_dim
+  params['h'] = float(args.MCD_h) if args.MCD_h else None
   num_params = len(glob.glob(os.path.join(args.log_path, "*.json")))
-  shutil.copyfile(args.model_params_path, os.path.join(args.log_path, f"params-{num_params}.json"))
+  with open(os.path.join(args.log_path, f"params-{num_params}.json"), "w") as w:
+    json.dump(params, w)
   logger.log.info("Using params...")
   logger.log.info(params)
 
@@ -101,8 +104,7 @@ if __name__ == "__main__":
   all_train_stats = [naive_train_stats, train_stats]
   all_estimators = [naive_estimators, estimators]
 
-  visualize = False
-  if visualize:
+  if args.visualize:
     dir_name = os.path.dirname(args.log_path)
     path_to_feat = os.path.join(dir_name, 'feats.txt')
     feat_n_label = np.concatenate([reduced_feat, labels[:,np.newaxis]], axis=-1)
@@ -131,7 +133,6 @@ if __name__ == "__main__":
     detector = Detector(model_wrapper, all_train_stats, loader, logger, params, (scaler, reducer, all_estimators, args.cov_estimator), use_val=args.use_val , dataset=args.dataset , seed=s)
     if args.baseline:
       detector.test_baseline_PPL(args.fpr_threshold)
-      # detector.test_baseline(args.fpr_threshold)
     else:
       roc, auc, tpr_at_fpr, naive_tpr, conf, testset = detector.test(args.fpr_threshold, args.pkl_test_path)
 
