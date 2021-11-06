@@ -135,63 +135,25 @@ def get_test_features(model_wrapper, batch_size, dataset, params, logger=None):
       preds.append(pred.cpu())
   return torch.cat(features, dim=0), torch.cat(preds, dim=0)
 
-
-def get_softmax(model_wrapper, batch_size, dataset, logger=None):
-  assert logger is not None, "No logger given"
-  num_samples = len(dataset)
-  num_batches = int((num_samples // batch_size) + 1)
-  probs = []
-  negative_entropy = []
-
-  with torch.no_grad():
-    for i in tqdm(range(num_batches)):
-      lower = i * batch_size
-      upper = min((i + 1) * batch_size, num_samples)
-      examples = dataset[lower:upper]
-      if len(examples) == 0:
-        continue
-      output = model_wrapper.inference(examples, output_hs=True, output_attention=True)
-      logit = output.logits
-      prob = F.softmax(logit, dim=-1)
-      max_prob = torch.max(prob, dim=-1).values
-      neg_ent = F.softmax(logit, dim=-1) * F.log_softmax(logit, dim=1)
-      neg_ent = neg_ent.sum(-1)
-      probs.append(max_prob.cpu())
-      negative_entropy.append(neg_ent.cpu())
-
-  return torch.cat(probs, dim=0), torch.cat(negative_entropy, dim=0)
-
-
-def compute_dist(test_features, train_stats, distance_type='mahal', diagonal_cov=False, regularized_cov=False, use_marginal=True):
+def compute_dist(test_features, train_stats, diagonal_cov=False, regularized_cov=False, use_marginal=True):
   # stats is list of np.array ; change to torch operations for gradient update
   output = []
   raw_score = []
-  if distance_type == "mahal":
-    print("Using mahalanobis distance...")
-    for (mu, cov) in train_stats:
-      mu, cov = torch.tensor(mu).double(), torch.tensor(cov).double()
-      if diagonal_cov:
-        diag_cov = torch.diag(cov)
-        cov = torch.diag(diag_cov)
-      if regularized_cov:
-        weight = torch.diag(cov).mean()
-        weight = 1
-        cov = cov + weight * torch.diag(torch.ones(cov.shape[0]))
-      prec = torch.inverse(cov)
-      delta = test_features-mu
-      neg_dist = - torch.einsum('nj, jk, nk -> n', delta, prec, delta)
-      log_likelihood = (0.5 * neg_dist) + math.log((2 * math.pi) ** (-mu.shape[0] / 2))
-      output.append(log_likelihood.unsqueeze(-1))
-      raw_score.append(neg_dist.unsqueeze(-1))
-  elif distance_type == "euclidean":
-    print("Using euclidean distance...")
-    for (mu, cov) in train_stats:
-      mu = torch.tensor(mu).double()
-      delta = test_features-mu
-      neg_dist = - torch.norm(delta, p=2, dim=1)**2
-      log_likelihood = (0.5 * neg_dist) + math.log((2*math.pi)**(-mu.shape[0]/2))
-      output.append(log_likelihood.unsqueeze(-1))
-      raw_score.append(neg_dist.unsqueeze(-1))
+  for (mu, cov) in train_stats:
+    mu, cov = torch.tensor(mu).double(), torch.tensor(cov).double()
+    if diagonal_cov:
+      diag_cov = torch.diag(cov)
+      cov = torch.diag(diag_cov)
+    if regularized_cov:
+      weight = torch.diag(cov).mean()
+      weight = 1
+      cov = cov + weight * torch.diag(torch.ones(cov.shape[0]))
+    prec = torch.inverse(cov)
+    delta = test_features-mu
+    neg_dist = - torch.einsum('nj, jk, nk -> n', delta, prec, delta)
+    log_likelihood = (0.5 * neg_dist) + math.log((2 * math.pi) ** (-mu.shape[0] / 2))
+    output.append(log_likelihood.unsqueeze(-1))
+    raw_score.append(neg_dist.unsqueeze(-1))
 
   output = torch.cat(output, dim=-1)
   raw_score = torch.cat(raw_score, dim=-1)
@@ -209,9 +171,7 @@ def detect_attack(testset, confidence, fpr_thres=0.05, visualize=False, logger=N
   Detect attack for correct samples only to compute detection metric (TPR, recall, precision)
   """
   assert logger is not None, "Logger not given"
-  # adv_count=None; visualize=True; fpr_thres=0.05
   target = np.array(testset['result_type'].tolist())
-  # target[target==-1] = 1
   conf = confidence.numpy()
   testset['negative_conf'] = -conf # negative of confidence : likelihood of adv. probability
 
@@ -257,138 +217,6 @@ def detect_attack(testset, confidence, fpr_thres=0.05, visualize=False, logger=N
   metric1 = (fpr, tpr, thres1)
   metric2 = (precision, recall, thres2)
   return metric1, metric2, tpr_at_fpr, f1, auc_value
-
-
-def predict_attack(testset, confidence, conf_indices, fpr_thres=0.05, adv_ratio=None, visualize=False, by_class=False):
-  # adv_count=None; visualize=True; fpr_thres=0.05
-  target = np.array(testset['result_type'].tolist())
-  target[target==-1] = 1
-  conf = confidence.numpy()
-  testset['negative_conf'] = -conf # negative of confidence : likelihood of adv. probability
-  testset['log_likelihood'] = np.log((2 * np.pi) ** (-768//2)) * (0.5 * -conf)
-  detection_result = np.zeros(len(target))
-
-  if by_class:
-    for idx in np.unique(conf_indices):
-      per_cls_target = target[conf_indices==idx]
-      per_cls_conf = conf[conf_indices==idx]
-      fpr, tpr, thres1 = roc_curve(per_cls_target, -per_cls_conf)
-      mask = (fpr > fpr_thres)
-      # adv_count = sum(per_cls_target)
-      if adv_ratio is None : #Choose threshold by fpr rate
-        detect_thres = np.max(mask*thres1)
-      else :
-        adv_count = int(adv_ratio * len(per_cls_conf))
-        detect_thres = np.sort(testset['negative_conf'].values[conf_indices==idx])[-adv_count] # adv_count th largest distance
-
-      if visualize:
-        ax = sns.boxplot(x='result_type', y='negative_conf', data=testset[(conf_indices == idx).numpy()])
-        plt.show()
-      detection_result[conf_indices == idx] = np.where(-per_cls_conf > detect_thres, 1, 0)
-  else:
-    # Class-agnostic
-    fpr, tpr, thres1 = roc_curve(target, -conf)
-    mask = (fpr > fpr_thres)
-    if adv_ratio is None:  # Choose threshold by fpr rate
-      detect_thres = np.max(mask * thres1)
-    else:
-      adv_count = int(adv_ratio * len(conf))
-      # adv_count = sum(target)
-      detect_thres = np.sort(testset['negative_conf'].values)[-adv_count]  # adv_count th largest distance
-
-    if visualize:
-      ax = sns.boxplot(x='result_type', y='negative_conf', data=testset)
-      plt.show()
-    detection_result[-conf > detect_thres] = 1
-
-  testset['pred_type'] = detection_result.tolist()
-
-def __get_test_features(model, tokenizer, batch_size, dataset, eps=1e-3):
-  # dataset, batch_size, i = testset['text'].tolist(), 64, 0
-  # gt = testset['ground_truth_output']
-  num_samples = len(dataset)
-  num_batches = int((num_samples // batch_size) + 1)
-  features = []
-  ce = nn.CrossEntropyLoss()
-
-  # num_batches = 2
-  for i in tqdm(range(num_batches)):
-    lower = i * batch_size
-    upper = min((i + 1) * batch_size, num_samples)
-    examples = dataset[lower:upper]
-    x = tokenizer(examples, padding='max_length', max_length=256,
-                  truncation=True, return_tensors='pt')
-    with torch.no_grad():
-      output = model(input_ids=x['input_ids'].to(model.device), attention_mask=x['attention_mask'].to(model.device),
-                     token_type_ids=(x['token_type_ids'].to(model.device) if 'token_type_ids' in x else None),
-                     output_hidden_states=False)
-      logits = output.logits
-      _, pred = torch.max(logits, dim=1)
-    model_embedding = model.bert.get_input_embeddings()
-    x_emb = model_embedding(x['input_ids'].to(model.device))
-    x_emb.retain_grad()
-    output = model(inputs_embeds=x_emb.to(model.device), attention_mask=x['attention_mask'].to(model.device),
-                   token_type_ids=(x['token_type_ids'].to(model.device) if 'token_type_ids' in x else None),
-                   output_hidden_states=True, labels=pred)
-    loss = output.loss
-    loss.backward()
-
-    x_calibrated = x_emb - eps * x_emb.grad
-    with torch.no_grad():
-      output = model(inputs_embeds=x_calibrated.to(model.device), attention_mask=x['attention_mask'].to(model.device),
-                     token_type_ids=(x['token_type_ids'].to(model.device) if 'token_type_ids' in x else None),
-                     output_hidden_states=True)
-      feat = output.hidden_states[-1][:, 0, :].cpu()  # (Batch_size, 768)
-      features.append(feat)
-
-    # feat = output.hidden_states[-1]  # (Batch_size, 768)
-    # pooled_feat = model.bert.pooler(feat)
-    # features.append(pooled_feat.cpu())
-
-  return torch.cat(features, dim=0)
-
-
-def detect_attack_per_cls(testset, confidence, conf_indices, fpr_thres=0.05, visualize=False, by_class=False, logger=None, mode=None):
-  """
-  Detect attack for correct samples only to compute detection metric (TPR, recall, precision)
-  """
-  assert logger is not None, "Logger not given"
-  # adv_count=None; visualize=True; fpr_thres=0.05
-  target = np.array(testset['result_type'].tolist())
-  target[target==-1] = 1
-  conf = confidence.numpy()
-  testset['negative_conf'] = -conf # negative of confidence : likelihood of adv. probability
-
-  results = []
-  # TODO : devise metric for whole class
-  # tp_cnt = 0
-  # fn_cnt = 0
-  for idx in np.unique(conf_indices):
-    per_cls_target = target[conf_indices==idx]
-    per_cls_conf = conf[conf_indices==idx]
-    fpr, tpr, thres1 = roc_curve(per_cls_target, -per_cls_conf)
-    precision, recall, thres2 = precision_recall_curve(per_cls_target, -per_cls_conf)
-    results.append([(fpr, tpr, thres1), (precision, recall, thres2)])
-    mask = (fpr > fpr_thres)
-    tpr_at_fpr = np.unique(tpr * mask)[1]  # Minimum tpr that is larger than 0
-    logger.log.info(f"TPR at FPR={fpr_thres} : {tpr_at_fpr}")
-    if visualize:
-      # ax = sns.boxplot(x='result_type', y='negative_conf', data=testset[(conf_indices == idx).numpy()])
-      # plt.show()
-      ax = plt.subplot()
-      kwargs = dict(histtype='stepfilled', alpha=0.3, bins=50, density=False)
-      data = testset[(conf_indices==idx).numpy()]
-      x1 = data.loc[data.result_type == 0, ['negative_conf']].values.squeeze()
-      ax.hist(x=x1, label='clean', **kwargs)
-      x2 = data.loc[data.result_type == 1, ['negative_conf']].values.squeeze()
-      ax.hist(x=x2, label='adv', **kwargs)
-      ax.set_title(f"Class {idx}")
-      ax.legend()
-
-  metric1 = (fpr, tpr, thres1)
-  metric2 = (precision, recall, thres2)
-  return metric1, metric2
-
 
 
 def compute_ppl(texts):

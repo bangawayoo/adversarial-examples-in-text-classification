@@ -115,8 +115,6 @@ class AttackLoader():
         adv.loc[:, 'result_type'] = 1
       else:
         adv = split.loc[split.result_type == 1]
-        if self.args.unbalanced:
-          pass
       adv = adv.rename(columns={"perturbed_text": "text"})
       num_adv_samples = adv.shape[0]
 

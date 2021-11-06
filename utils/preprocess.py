@@ -31,6 +31,3 @@ def fgws_preprocess(sentence):
 	sentence = pad(200, sentence, "<pad>")
 	sentence = ' '.join(sentence)
 	return sentence
-
-def standard_preprocess(setence):
-	pass

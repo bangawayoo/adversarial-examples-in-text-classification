@@ -1,7 +1,3 @@
-import pdb
-
-import matplotlib.pyplot
-
 from utils.detection import *
 from utils.dataset import *
 from utils.miscellaneous import *
@@ -48,23 +44,10 @@ class Detector():
         test_features = self.scaler.transform(test_features)
       test_features = torch.tensor(self.dim_reducer.transform(test_features))
 
-
-    for name, stats, estim in zip(["naive", self.estimator_name], self.stats, self.estimators):
+    metric_header = ["tpr", "fpr", "f1", "auc"]
+    for name, stats, estim in zip(["MLE", self.estimator_name], self.stats, self.estimators):
+      self.logger.log.info("-----Results-----")
       self.logger.log.info(f"Using {name} estimator")
-      if name == "naive":
-        confidence, conf_indices, conf_all = compute_dist(test_features, stats, distance_type="euclidean",
-                                                          use_marginal=False)
-        confidence = conf_all[torch.arange(preds.numel()), preds]
-        num_nans = sum(confidence == -float("Inf"))
-        if num_nans != 0:
-          self.logger.log.info(f"Warning : {num_nans} Nans in confidence")
-          confidence[confidence == -float("inf")] = -1e6
-        metric_header = ["tpr", "fpr", "f1", "auc"]
-        self.logger.log.info("-----Results for Euclidean distance------")
-        roc, pr, naive_tpr, f1, auc = detect_attack(testset, confidence, fpr_thres, visualize=True, logger=self.logger, mode=f"euclidean")
-        self.logger.save_custom_metric(f"euclidean", [naive_tpr, fpr_thres, f1, auc], metric_header)
-
-      self.logger.log.info("-----Results for Mahal. OOD------")
       if estim:
         all_confidences = []
         test_features = test_features.numpy()
@@ -74,8 +57,7 @@ class Detector():
         all_confidences = np.concatenate(all_confidences, axis=1)
         confidence = -torch.tensor(all_confidences[np.arange(preds.numel()), preds])
       else:
-        confidence, conf_indices, conf_all = compute_dist(test_features, stats, distance_type="mahal",
-                                                          use_marginal=False)
+        confidence, conf_indices, conf_all = compute_dist(test_features, stats, use_marginal=False)
         confidence = conf_all[torch.arange(preds.numel()), preds]
 
       num_nans = sum(confidence == -float("Inf"))
@@ -84,37 +66,11 @@ class Detector():
         confidence[confidence == -float("inf")] = -1e6
       roc, pr, tpr_at_fpr, f1, auc = detect_attack(testset, confidence,
                                            fpr_thres,
-                                           visualize=True, logger=self.logger, mode=f"{name}-mahal", log_metric=True)
-      self.logger.save_custom_metric(f"{name}-mahal", [tpr_at_fpr, fpr_thres, f1, auc], metric_header)
+                                           visualize=True, logger=self.logger, mode=f"{name}-estim", log_metric=True)
+      self.logger.save_custom_metric(f"{name}-estim.", [tpr_at_fpr, fpr_thres, f1, auc], metric_header)
 
-    return roc, auc, tpr_at_fpr, naive_tpr, confidence, testset
+    return roc, auc, tpr_at_fpr, confidence, testset
 
-
-  def test_baseline(self, fpr_thres, pkl_path=None):
-    testset = self.get_data()
-    texts = testset['text'].tolist()
-
-    self.logger.log.info("---------Baseline Test Mode---------")
-    max_probs, negative_entropy = get_softmax(self.model_wrapper, batch_size=self.batch_size, dataset=texts,
-                                             logger=self.logger)
-
-    num_nans = sum(negative_entropy == -float("Inf"))
-    if num_nans != 0:
-      self.logger.log.info(f"Warning : {num_nans} Nans in entropy")
-      negative_entropy[negative_entropy == -float("inf")] = -1e6
-
-    metric_header = ["tpr", "fpr", "f1", "auc"]
-    self.logger.log.info("-----Results for Baseline: Max. probability------")
-    roc, pr, tpr, f1, auc = detect_attack(testset, max_probs, fpr_thres,
-                                visualize=False, logger=self.logger, mode="Baseline:MaxProb", log_metric=True)
-    self.logger.save_custom_metric("max_prob-results", [tpr, fpr_thres, f1, auc], metric_header)
-
-    self.logger.log.info("-----Results for Baseline: negative entropy------")
-    roc, pr, tpr, f1, auc = detect_attack(testset, negative_entropy,
-                                         fpr_thres,
-                                         visualize=False, logger=self.logger, mode="Baseline:NegEnt.", log_metric=True)
-    self.logger.save_custom_metric("neg_ent-results", [tpr, fpr_thres, f1, auc], metric_header)
-    return
 
   def test_baseline_PPL(self, fpr_thres, pkl_path=None):
     testset = self.get_data()

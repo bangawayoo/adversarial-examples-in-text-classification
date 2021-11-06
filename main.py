@@ -7,35 +7,24 @@ import pdb
 parser = argparse.ArgumentParser(description="Detect and defense attacked samples")
 
 parser.add_argument("--dataset", default="imdb", type=str,
-                    choices=["dbpedia14", "ag-news", "imdb", "yelp", "mnli", "sst2"],
+                    choices=["ag-news", "imdb", "yelp", "mnli", "sst2"],
                     help="classification dataset to use")
-parser.add_argument("--preprocess", default="standard", type=str,
-                    choices=["standard", "fgws"])
-parser.add_argument("--data_type", default="standard", type=str,
-                    choices=["standard", "fgws"])
-parser.add_argument("--target_model", default="textattack/bert-base-uncased-imdb", type=str, #textattack/roberta-base-SST-2
+parser.add_argument("--target_model", default="textattack/bert-base-uncased-imdb", type=str,
                     help="name of model (textattack pretrained model, path to ckpt)")
 parser.add_argument("--model_type", type=str, help="model type (e.g. bert, roberta, cnn)")
 
 parser.add_argument("--scenario", type=str, help="scenario that determines how the configure the adv. dataset")
 parser.add_argument("--include_fae", default=False, action='store_true', help="Include failed adversarial examples for detection as well")
-parser.add_argument("--unbalanced", default=False, type=str)
 parser.add_argument("--use_val", default=False, action='store_true')
 parser.add_argument("--cov_estimator", type=str, help="covariance esitmator",
                     choices=["OAS", "MCD", "None"])
 
-
-parser.add_argument("--pkl_test_path", default=" ", type=str,
-                    help="perturbed texts files with extension csv or pkl")
-parser.add_argument("--pkl_val_path", default=" ", type=str,
-                    help="perturbed texts files with extension csv or pkl")
 parser.add_argument("--attack_type", default='textfooler', type=str,
                     help="attack type for logging")
 parser.add_argument("--exp_name", default='tmp', type=str,
                     help="Name for logging")
 
 parser.add_argument("--fpr_threshold", default=0.10)
-parser.add_argument("--compute_bootstrap", default=False, action="store_true")
 parser.add_argument("--baseline", default=False, action="store_true")
 parser.add_argument("--visualize", default=False, action="store_true")
 
@@ -52,6 +41,16 @@ parser.add_argument("--end_seed", default=0, type=int)
 parser.add_argument("--mnli_option", default="matched", type=str,
                     choices=["matched", "mismatched"],
                     help="use matched or mismatched test set for MNLI")
+#Options for FGWS settings
+parser.add_argument("--preprocess", default="standard", type=str,
+                    choices=["standard", "fgws"])
+parser.add_argument("--data_type", default="standard", type=str,
+                    choices=["standard", "fgws"])
+parser.add_argument("--pkl_test_path", default=" ", type=str,
+                    help="perturbed texts files with extension csv or pkl")
+parser.add_argument("--pkl_val_path", default=" ", type=str,
+                    help="perturbed texts files with extension csv or pkl")
+
 
 args, _ = parser.parse_known_args()
 
@@ -135,15 +134,5 @@ if __name__ == "__main__":
     if args.baseline:
       detector.test_baseline_PPL(args.fpr_threshold)
     else:
-      roc, auc, tpr_at_fpr, naive_tpr, conf, testset = detector.test(args.fpr_threshold, args.pkl_test_path)
-
-    if args.compute_bootstrap:
-      # Compute bootstrap scores
-      target = testset.result_type.values
-      scores = compute_bootstrap_score(conf, target, roc, args.fpr_threshold)
-
-      logger.log.info("-----Bootstrapped Results-----")
-      for k, v in scores.items():
-        logger.log.info(f"{k}: {v:.4f}")
-
+      roc, auc, tpr_at_fpr, conf, testset = detector.test(args.fpr_threshold, args.pkl_test_path)
 
