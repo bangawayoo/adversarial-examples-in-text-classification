@@ -1,7 +1,7 @@
 import argparse
 import json
+import time
 import pdb
-
 
 
 parser = argparse.ArgumentParser(description="Detect and defense attacked samples")
@@ -97,13 +97,14 @@ if __name__ == "__main__":
   trainset, _ = split_dataset(trainvalset, split='trainval', split_ratio=1.0)
   feats = get_train_features(model_wrapper, args, batch_size=256, dataset=trainset, text_key=text_key, layer=params['layer_param']['cls_layer'])
   feats = feats.numpy()
+  s_time = time.time()
   reduced_feat, labels, reducer, scaler = preprocess_features(feats, params, args, logger)
 
   train_stats, estimators = get_stats(reduced_feat, labels, cov_estim_name=args.cov_estimator, use_shared_cov=params['shared_cov'], params=params)
   naive_train_stats, naive_estimators = get_stats(reduced_feat, labels, cov_estim_name="None", use_shared_cov=params['shared_cov'])
   all_train_stats = [naive_train_stats, train_stats]
   all_estimators = [naive_estimators, estimators]
-
+  logger.log.info(f"Elapsed time for model fitting : {time.time()-s_time}")
   if args.visualize:
     dir_name = os.path.dirname(args.log_path)
     path_to_feat = os.path.join(dir_name, 'feats.txt')
