@@ -2,9 +2,11 @@ name: hg
 channels:
   - pytorch
   - huggingface
+  - conda-forge
   - defaults
 dependencies:
   - _libgcc_mutex=0.1=main
+  - _openmp_mutex=4.5=1_gnu
   - _tflow_select=2.3.0=mkl
   - absl-py=0.12.0=py37h06a4308_0
   - argon2-cffi=20.1.0=py37h27cfd23_1
@@ -18,16 +20,24 @@ dependencies:
   - brotlipy=0.7.0=py37h27cfd23_1003
   - bzip2=1.0.8=h7b6447c_0
   - c-ares=1.17.1=h27cfd23_0
-  - ca-certificates=2021.5.25=h06a4308_1
-  - certifi=2021.5.30=py37h06a4308_0
+  - ca-certificates=2021.10.8=ha878542_0
+  - cached-property=1.5.2=hd8ed1ab_1
+  - cached_property=1.5.2=pyha770c72_1
+  - catalogue=2.0.4=py37h89c1867_0
+  - certifi=2021.10.8=py37h89c1867_1
   - cffi=1.14.0=py37h2e261b9_0
   - chardet=4.0.0=py37h06a4308_1003
   - click=7.1.2=pyhd3eb1b0_0
+  - colorama=0.4.4=pyh9f0ad1d_0
   - cryptography=2.3.1=py37hc365091_0
   - cudatoolkit=10.2.89=hfd86e86_1
+  - cupy=9.2.0=py37hfed0110_0
+  - cymem=2.0.5=py37hcd2ae1e_2
+  - cython-blis=0.7.4=py37h902c9e0_0
   - dbus=1.13.18=hb2f20db_0
   - defusedxml=0.7.1=pyhd3eb1b0_0
   - expat=2.4.1=h2531618_2
+  - fastrlock=0.6=py37hcd2ae1e_1
   - ffmpeg=4.2.2=h20bf706_0
   - filelock=3.0.12=pyhd3eb1b0_1
   - fontconfig=2.13.1=h6c09931_0
@@ -38,7 +48,6 @@ dependencies:
   - google-pasta=0.2.0=py_0
   - gst-plugins-base=1.14.0=hbbd80ab_1
   - gstreamer=1.14.0=hb453b48_1
-  - h5py=2.10.0=py37hd6299e0_1
   - hdf5=1.10.6=hb1b8bf9_0
   - icu=58.2=he6710b0_3
   - idna=2.10=pyhd3eb1b0_0
@@ -61,14 +70,15 @@ dependencies:
   - lcms2=2.12=h3be6417_0
   - libedit=3.1.20210216=h27cfd23_1
   - libffi=3.2.1=hf484d3e_1007
-  - libgcc-ng=9.1.0=hdf63c60_0
+  - libgcc-ng=9.3.0=h5101ec6_17
   - libgfortran-ng=7.3.0=hdf63c60_0
+  - libgomp=9.3.0=h5101ec6_17
   - libidn2=2.3.0=h27cfd23_0
   - libopus=1.3.1=h7b6447c_0
   - libpng=1.6.37=hbc83047_0
   - libprotobuf=3.14.0=h8c45485_0
   - libsodium=1.0.18=h7b6447c_0
-  - libstdcxx-ng=9.1.0=hdf63c60_0
+  - libstdcxx-ng=11.1.0=h56837e0_2
   - libtasn1=4.16.0=h27cfd23_0
   - libtiff=4.1.0=h2733197_1
   - libunistring=0.9.10=h27cfd23_0
@@ -85,6 +95,7 @@ dependencies:
   - mkl-service=2.3.0=py37he8ac12f_0
   - mkl_fft=1.3.0=py37h54f3939_0
   - mkl_random=1.1.1=py37h0573a6f_0
+  - murmurhash=1.0.5=py37hcd2ae1e_0
   - nbclient=0.5.3=pyhd3eb1b0_0
   - nbconvert=6.0.7=py37_0
   - nbformat=5.1.3=pyhd3eb1b0_0
@@ -96,22 +107,26 @@ dependencies:
   - numpy-base=1.19.2=py37hfa32c7d_0
   - olefile=0.46=py37_0
   - openh264=2.1.0=hd408876_0
-  - openssl=1.0.2u=h7b6447c_0
+  - openssl=1.0.2u=h516909a_0
   - opt_einsum=3.1.0=py_0
   - packaging=20.9=pyhd3eb1b0_0
   - pandoc=2.12=h06a4308_0
   - pandocfilters=1.4.3=py37h06a4308_1
   - parso=0.8.2=pyhd3eb1b0_0
+  - pathy=0.6.0=pyhd8ed1ab_0
+  - patsy=0.5.2=pyhd8ed1ab_0
   - pcre=8.44=he6710b0_0
   - pexpect=4.8.0=pyhd3eb1b0_3
   - pickleshare=0.7.5=pyhd3eb1b0_1003
   - pillow=8.2.0=py37he98fc37_0
   - pip=21.0.1=py37h06a4308_0
+  - preshed=3.0.5=py37hcd2ae1e_1
   - prometheus_client=0.10.1=pyhd3eb1b0_0
   - prompt_toolkit=3.0.17=hd3eb1b0_0
   - protobuf=3.14.0=py37h2531618_1
   - ptyprocess=0.7.0=pyhd3eb1b0_2
   - pycparser=2.20=py_2
+  - pydantic=1.8.2=py37h5e8e339_0
   - pygments=2.9.0=pyhd3eb1b0_0
   - pyopenssl=19.0.0=py37_0
   - pyparsing=2.4.7=pyhd3eb1b0_0
@@ -121,7 +136,7 @@ dependencies:
   - python=3.7.0=h6e4f718_3
   - python-dateutil=2.8.1=pyhd3eb1b0_0
   - python_abi=3.7=1_cp37m
-  - pytorch=1.8.1=py3.7_cuda10.2_cudnn7.6.5_0
+  - pytorch=1.7.0=py3.7_cuda10.2.89_cudnn7.6.5_0
   - qt=5.9.6=h8703b6f_2
   - qtconsole=5.0.3=pyhd3eb1b0_0
   - qtpy=1.9.0=py_0
@@ -131,20 +146,28 @@ dependencies:
   - sacremoses=master=py_0
   - send2trash=1.5.0=pyhd3eb1b0_1
   - setuptools=52.0.0=py37h06a4308_0
+  - shellingham=1.4.0=pyh44b312d_0
   - sip=4.19.8=py37hf484d3e_0
   - six=1.15.0=py37h06a4308_0
+  - smart_open=5.1.0=pyhd8ed1ab_1
+  - spacy=3.1.1=py37hda21425_0
+  - spacy-legacy=3.0.8=pyhd8ed1ab_0
   - sqlite=3.33.0=h62c20be_0
-  - tensorflow=2.0.0=mkl_py37h66b46cc_0
+  - srsly=2.4.1=py37hcd2ae1e_0
+  - statsmodels=0.12.2=py37h902c9e0_0
   - tensorflow-base=2.0.0=mkl_py37h9204916_0
+  - thinc=8.0.8=py37hda21425_0
   - tk=8.6.10=hbc83047_0
   - tokenizers=0.10.1=py37_0
-  - torchaudio=0.8.1=py37
-  - torchvision=0.9.1=py37_cu102
+  - torchaudio=0.7.0=py37
+  - torchvision=0.8.1=py37_cu102
   - tornado=6.1=py37h27cfd23_0
   - traitlets=5.0.5=pyhd3eb1b0_0
   - transformers=4.4.2=py_0
-  - typing_extensions=3.7.4.3=pyha847dfd_0
+  - typer=0.3.2=pyhd8ed1ab_0
+  - typing_extensions=3.10.0.0=pyha770c72_0
   - urllib3=1.26.4=pyhd3eb1b0_0
+  - wasabi=0.8.2=pyh44b312d_0
   - wcwidth=0.2.5=py_0
   - wheel=0.36.2=pyhd3eb1b0_0
   - widgetsnbextension=3.5.1=py37_0
@@ -169,19 +192,21 @@ dependencies:
     - dill==0.3.3
     - docopt==0.6.2
     - editdistance==0.5.3
+    - en-core-web-sm==3.1.0
     - entrypoints==0.3
     - flair==0.8
     - flatbuffers==1.12
     - fsspec==2021.4.0
     - ftfy==6.0.1
     - future==0.18.2
-    - gast==0.3.3
+    - gast==0.4.0
     - gdown==3.12.2
     - gensim==3.8.3
     - google-auth==1.29.0
     - google-auth-oauthlib==0.4.4
     - gpytorch==1.4.1
-    - grpcio==1.32.0
+    - grpcio==1.34.1
+    - h5py==3.1.0
     - huggingface-hub==0.0.8
     - hyperopt==0.2.5
     - importlib-metadata==3.10.1
@@ -192,6 +217,7 @@ dependencies:
     - jedi==0.18.0
     - jinja2==3.0.1
     - jiwer==2.2.0
+    - keras-nightly==2.5.0.dev2021032900
     - kiwisolver==1.3.1
     - konoha==4.6.4
     - langdetect==1.0.8
@@ -235,17 +261,19 @@ dependencies:
     - tensorboard==2.5.0
     - tensorboard-data-server==0.6.0
     - tensorboard-plugin-wit==1.8.0
-    - tensorflow-estimator==2.4.0
+    - tensorflow==2.5.0
+    - tensorflow-estimator==2.5.0
     - tensorflow-hub==0.12.0
+    - tensorflow-text==2.5.0
     - termcolor==1.1.0
     - terminado==0.10.0
     - terminaltables==3.1.0
     - testpath==0.5.0
-    - textattack==0.2.15
+    - textattack==0.3.3
     - threadpoolctl==2.1.0
     - tqdm==4.49.0
+    - typing-extensions==3.7.4.3
     - webencodings==0.5.1
     - werkzeug==1.0.1
     - word2number==1.1
     - xxhash==2.0.2
-prefix: /home/ky/miniconda3/envs/hg

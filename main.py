@@ -28,9 +28,7 @@ parser.add_argument("--fpr_threshold", default=0.10)
 parser.add_argument("--baseline", default=False, action="store_true")
 parser.add_argument("--visualize", default=False, action="store_true")
 
-parser.add_argument("--tune_params", default=False, action="store_true",
-                    help="Whether to use the found best_params.pkl if it exists")
-parser.add_argument("--model_params_path", type=str, default="params/attention_key-exclude.json",
+parser.add_argument("--model_params_path", type=str, default="params/reduce_dim_false.json",
                     help="path to json file containing params about probability modeling")
 parser.add_argument("--PCA_dim", type=int, default=None)
 parser.add_argument("--MCD_h", type=float, default=None)
@@ -94,6 +92,7 @@ if __name__ == "__main__":
   trainvalset, _, key = get_dataset(args)
   text_key, testset_key = key
   trainset, _ = split_dataset(trainvalset, split='trainval', split_ratio=1.0)
+  #Get features from the train set. Load from pickle if exists
   feats = get_train_features(model_wrapper, args, batch_size=256, dataset=trainset, text_key=text_key, layer=params['layer_param']['cls_layer'])
   feats = feats.numpy()
   s_time = time.time()
@@ -104,6 +103,8 @@ if __name__ == "__main__":
   all_train_stats = [naive_train_stats, train_stats]
   all_estimators = [naive_estimators, estimators]
   logger.log.info(f"Elapsed time for model fitting : {time.time()-s_time}")
+
+
   if args.visualize:
     dir_name = os.path.dirname(args.log_path)
     path_to_feat = os.path.join(dir_name, 'feats.txt')
