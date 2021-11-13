@@ -1,4 +1,4 @@
-#Detection of Adversarial Examples in NLP: Benchmark and Baseline via Robust Density Estimation
+# Detection of Adversarial Examples in NLP: Benchmark and Baseline via Robust Density Estimation
 
 Anonymous official code for *Detection of Adversarial Examples in NLP: Benchmark and Baseline via Robust Density Estimation*.
 
@@ -77,7 +77,7 @@ bash run_test.sh
 We provide some parameter files used in paper. This can be run by changing `PARAM_PATH`. 
 ```
 ./params/reduce_dim_100.json #P=100, kernel: RBF (denoted as RDE) 
-./params/reduce_dim_100_false.json #full dimensions (denoted as MLE)
+./params/reduce_dim_false.json #full dimensions (denoted as MLE)
 ./params/reduce_dim_100_linear.json #P=100, kernel: linear (standard PCA)
 ```
 

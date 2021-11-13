@@ -125,7 +125,7 @@ def confidence_ellipse(ax, x=None, y=None, precomputed_stats=None, n_std=3.0, fa
   return ax.add_patch(ellipse)
 
 feats = np.loadtxt('fig/data/sst2-bert-feats.txt')
-sample_idx = np.random.choice(range(len(feats)), size=50, replace=False)
+sample_idx = np.random.choice(range(len(feats)), size=40, replace=False)
 sampled = feats[sample_idx, :-1]
 labels = feats[sample_idx, -1]
 all_labels = feats[:,-1]
@@ -161,32 +161,32 @@ ax.tick_params(axis='both', direction='in', grid_alpha=0)
 plt.savefig('fig/MCD.pdf', dpi=300)
 
 
-fig, ax = plt.subplots()
-cls = 1
-for h_ in [0.3, 0.5, 0.7, 0.9, 1.0]:
-  cov_estim = return_cov_estimator('MCD', params={'h':h_})
-  cov = cov_estim.fit(feats[all_labels==cls, :-1]).covariance_
-  loc = cov_estim.location_
-  stats = {'cov': cov, 'mu':loc}
-  color = plt.cm.magma(h_)
-  MCD_kwargs = {'edgecolor': color, 'linewidth': 2}
-  confidence_ellipse(ax, feats[all_labels == cls, 0], feats[all_labels ==cls, 1], precomputed_stats=stats,
-                     n_std=3, label=f'{h_}', **MCD_kwargs)
-
-# confidence_ellipse(ax, feats[all_labels == cls_idx, 0], feats[all_labels == cls_idx, 1],n_std=n_std, linestyle='--', edgecolor='tab:blue', label='MLE')
-
-single_cls_feats = feats[all_labels==cls]
-sample_idx = np.random.choice(range(len(single_cls_feats)), size=50, replace=False)
-sampled = single_cls_feats[sample_idx, :-1]
-labels = single_cls_feats[sample_idx, -1]
-scatter = ax.scatter(sampled[:,0], sampled[:,1], color=color1)
-ax.legend(prop={'size':22}, loc='upper left')
-
-ax.set_xlim(-0.6, -0.3)
-ax.set_ylim(-0.5,0.5)
-ax.tick_params(axis='both', direction='in', grid_alpha=0)
-ax.set_title("MCD Contour at Various $h$")
-plt.savefig("fig/MCD_at_various_h.pdf", dpi=300)
+# fig, ax = plt.subplots()
+# cls = 1
+# for h_ in [0.3, 0.5, 0.7, 0.9, 1.0]:
+#   cov_estim = return_cov_estimator('MCD', params={'h':h_})
+#   cov = cov_estim.fit(feats[all_labels==cls, :-1]).covariance_
+#   loc = cov_estim.location_
+#   stats = {'cov': cov, 'mu':loc}
+#   color = plt.cm.magma(h_)
+#   MCD_kwargs = {'edgecolor': color, 'linewidth': 2}
+#   confidence_ellipse(ax, feats[all_labels == cls, 0], feats[all_labels ==cls, 1], precomputed_stats=stats,
+#                      n_std=3, label=f'{h_}', **MCD_kwargs)
+#
+# # confidence_ellipse(ax, feats[all_labels == cls_idx, 0], feats[all_labels == cls_idx, 1],n_std=n_std, linestyle='--', edgecolor='tab:blue', label='MLE')
+#
+# single_cls_feats = feats[all_labels==cls]
+# sample_idx = np.random.choice(range(len(single_cls_feats)), size=50, replace=False)
+# sampled = single_cls_feats[sample_idx, :-1]
+# labels = single_cls_feats[sample_idx, -1]
+# scatter = ax.scatter(sampled[:,0], sampled[:,1], color=color1)
+# ax.legend(prop={'size':22}, loc='upper left')
+#
+# ax.set_xlim(-0.6, -0.3)
+# ax.set_ylim(-0.5,0.5)
+# ax.tick_params(axis='both', direction='in', grid_alpha=0)
+# ax.set_title("MCD Contour at Various $h$")
+# plt.savefig("fig/MCD_at_various_h.pdf", dpi=300)
 
 ##%
 path = 'runs/imdb/discussion/MCD/textattack-bert-base-uncased-imdb/textfooler/MCD-mahal.csv'
@@ -232,10 +232,11 @@ for idx in range(len(paths)):
   x = np.arange(1,len(x_labels)+1)
   w = 0.3
 
-  axes[idx].bar(x-w, data.loc['original'], w)
-  axes[idx].bar(x, data.loc['RDE'], w)
-  axes[idx].bar(x+w, data.loc['MLE'], w)
+  axes[idx].bar(x-w, data.loc['original'], w, label='Original')
+  axes[idx].bar(x, data.loc['RDE'], w, label='RDE')
+  axes[idx].bar(x+w, data.loc['MLE'], w, label='MLE')
   axes[idx].set_xticks(range(1,len(x_labels)+1))
+  axes[idx].set_ylim(0.5,1)
 
 axes[0].set_ylabel('AUC')
 fig.supxlabel('', fontsize=25, weight='bold')
@@ -250,6 +251,7 @@ fig.text(0.81, 0.93, 'SST-2', fontsize=20, weight='bold')
 axes[4].set_title('BERT', fontsize=18)
 axes[5].set_title('ROBERTa', fontsize=18)
 
+axes[-1].legend(loc='lower center')
 fig.savefig('fig/fae.pdf', dpi=300)
 
 
@@ -271,3 +273,68 @@ ax.set_xlabel(r'log$p_{\theta}(z)$')
 ax.legend(prop={'size':30}, loc='upper left')
 
 fig.savefig('fig/confidence.pdf', dpi=300)
+
+###
+from sklearn.metrics import roc_curve, roc_auc_score
+from matplotlib import gridspec
+# Load our data
+data_list = ['imdb', 'ag-news', 'sst2']
+attack_list = ['tf', 'pwws']
+fig = plt.figure()
+
+ax_cnt = 1
+for r_idx, d_name in enumerate(data_list):
+  for c_idx, a_name in enumerate(attack_list):
+    small_ax = fig.add_subplot(3,2,ax_cnt)
+    small_ax.set_aspect('equal')
+    ax_cnt +=1
+    # d_name, a_name = 'imdb', 'tf'
+    conf_path = f"fig/data/roc/{d_name}/{a_name}/conf.csv"
+    gt_path = f"fig/data/roc/{d_name}/{a_name}/gt.csv"
+    data = np.loadtxt(conf_path)
+    gt = np.loadtxt(gt_path)
+    fgws_path = f"fig/data/roc/{d_name}/{a_name}/scores-0.csv"
+    fgws = np.loadtxt(fgws_path, delimiter=',')
+    gts = [gt, gt, fgws[:,1]]
+    scores = [data[:,1], data[:,0], -fgws[:,0]]
+    names = ['RDE', r'$-$MCD', 'FGWS']
+
+    small_ax.set_yticks(np.arange(0, 1.1, 0.1), minor=True)
+    small_ax.set_xticks(np.arange(0, 1.1, 0.1), minor=True)
+    small_ax.grid(which='minor', alpha=1.0)
+
+    #Compute
+    for gt, score, name in zip(gts, scores, names):
+      fpr, tpr, threshold = roc_curve(gt, -score)
+      auc = roc_auc_score(gt, -score)
+
+      #plot parameters
+      lw = 2
+
+      name_plus_auc = f"{name}: {auc*100:.1f}"
+      small_ax.plot(fpr, tpr, label=name_plus_auc)
+      small_ax.plot([0, 1], [0, 1], color="grey", lw=lw, linestyle="--")
+
+
+ax.set_xlabel("False Positive Rate")
+ax.set_ylabel("True Positive Rate")
+
+all_axes = fig.get_axes()
+all_axes[0].set_ylabel("IMDB")
+all_axes[2].set_ylabel("AG-News")
+all_axes[4].set_ylabel("SST-2")
+
+all_axes[0].set_xlabel("TF")
+all_axes[0].xaxis.set_label_position('top')
+
+all_axes[1].set_xlabel("PWWS")
+all_axes[1].xaxis.set_label_position('top')
+
+for s_ax in all_axes:
+  s_ax.legend(prop={'size':13})
+
+all_axes[1].set_yticks([])
+all_axes[3].set_yticks([])
+all_axes[5].set_yticks([])
+
+fig.savefig('fig/ROC.pdf', dpi=300)

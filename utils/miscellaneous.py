@@ -35,6 +35,19 @@ def save_txt(object, path):
   with open(path, "w") as handle:
     handle.write(object)
 
+def save_array(object, path, append=True):
+  if os.path.exists(path) and append:
+    existing_data = np.loadtxt(path)
+    if len(existing_data.shape) == 1 :
+      existing_data = np.expand_dims(existing_data, -1)
+    if len(object.shape) == 1:
+      object = np.expand_dims(object, -1)
+    existing_data = np.concatenate([existing_data, object], axis=-1)
+    np.savetxt(path, existing_data)
+    return
+  else:
+    np.savetxt(path, object)
+
 
 
 def bootstrap_sample(all_unperturbed, all_perturbed, bootstrap_sample_size=2000):

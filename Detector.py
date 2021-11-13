@@ -1,3 +1,5 @@
+import pdb
+
 from utils.detection import *
 from utils.dataset import *
 from utils.miscellaneous import *
@@ -34,7 +36,10 @@ class Detector():
   def test(self, fpr_thres, pkl_path=None):
     testset = self.get_data(pkl_path)
     texts = testset['text'].tolist()
-    gt = torch.tensor(testset['ground_truth_output'].tolist())
+    att_result = torch.tensor(testset['result_type'].tolist())
+    path_to_gt = os.path.join(self.logger.log_path, "gt.csv")
+    if True:
+      save_array(att_result, path_to_gt, append=False)
 
     test_features, preds = get_test_features(self.model_wrapper, batch_size=self.batch_size, dataset=texts, params=self.params,
                                              logger=self.logger)
@@ -45,6 +50,8 @@ class Detector():
       test_features = torch.tensor(self.dim_reducer.transform(test_features))
 
     metric_header = ["tpr", "fpr", "f1", "auc"]
+    path_to_conf = os.path.join(self.logger.log_path, "conf.csv")
+
     for name, stats, estim in zip(["MLE", self.estimator_name], self.stats, self.estimators):
       self.logger.log.info("-----Results-----")
       self.logger.log.info(f"Using {name} estimator")
@@ -59,6 +66,9 @@ class Detector():
       else:
         confidence, conf_indices, conf_all = compute_dist(test_features, stats, use_marginal=False)
         confidence = conf_all[torch.arange(preds.numel()), preds]
+
+      if True:
+        save_array(confidence, path_to_conf)
 
       num_nans = sum(confidence == -float("Inf"))
       if num_nans != 0:
