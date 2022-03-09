@@ -1,6 +1,6 @@
 # Detection of Adversarial Examples in NLP: Benchmark and Baseline via Robust Density Estimation
 
-Official code for *Detection of Adversarial Examples in NLP: Benchmark and Baseline via Robust Density Estimation, 
+Official code for *Detection of Adversarial Examples in Text Classification: Benchmark and Baseline via Robust Density Estimation, 
 (ACL Findings 2022)*.
 
 ## Main Libraries
