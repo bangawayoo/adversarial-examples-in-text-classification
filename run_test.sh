@@ -1,6 +1,7 @@
 export CUDA_VISIBLE_DEVICES=0,1
-MODEL=("bert" "roberta") #generic name for models; Options: ("bert", "roberta")
+D_ROOT_DIR="attack-log/original"
 
+MODEL=("bert" "roberta") #generic name for models; Options: ("bert", "roberta")
 DATASET="imdb"   #Options: ("imdb" , "ag-news", "sst2")
 MODEL_DATASET="imdb" #Change to "SST-2" for "sst2" only
 TARGET_MODEL=("textattack/bert-base-uncased-$MODEL_DATASET" "textattack/roberta-base-$MODEL_DATASET")
@@ -22,6 +23,6 @@ do
     python main.py --dataset $DATASET --model_type ${MODEL[i]}\
     --attack_type $recipe --scenario $SCEN --cov_estimator $ESTIM\
     --start_seed $START_SEED --end_seed $END_SEED --model_params_path $PARAM_PATH\
-    --exp_name $EXP_NAME --gpu $GPU --target_model ${TARGET_MODEL[i]}
+    --exp_name $EXP_NAME --gpu $GPU --target_model ${TARGET_MODEL[i]} --data_root_dir $D_ROOT_DIR
   done
 done

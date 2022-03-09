@@ -1,6 +1,7 @@
 # Detection of Adversarial Examples in NLP: Benchmark and Baseline via Robust Density Estimation
 
-Anonymous official code for *Detection of Adversarial Examples in NLP: Benchmark and Baseline via Robust Density Estimation*.
+Official code for *Detection of Adversarial Examples in NLP: Benchmark and Baseline via Robust Density Estimation, 
+(ACL Findings 2022)*.
 
 ## Main Libraries
 * python (3.7.0)
@@ -16,12 +17,18 @@ If you only wish to use the benchmark dataset without reproducing the experiment
 Install the dependenceis as needed. 
 
 ## Dataset 
-Download the generated attacks from here and unzip it. The directory should look like 
+Download the generated attacks from [this link](https://drive.google.com/file/d/1eNJn7rX2OE9UKrrknmvClt3IK2cUTRjB/view?usp=sharing) and unzip it. The zip file contains original attacks and adaptive attacks 
+described in the paper. 
+The directory should look like 
 ```
 ./attack-log
-    imdb/
-    ag-news/
-    sst2/
+    original/
+        imdb/
+        ag-news/
+        sst2/
+        yelp/
+    stronger/
+    strongest/ 
 ./README.md 
 ./run_test.sh
 ...
