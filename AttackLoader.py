@@ -19,12 +19,12 @@ class AttackLoader():
     self.cache_dir = "attack-log/cache"
     self.logger = logger
     self.scenario = args.scenario
-    self.max_adv_num_dict = {'imdb':2000, 'ag-news':2000, 'sst2':1000}
+    self.max_adv_num_dict = {'imdb':2000, 'ag-news':2000, 'sst2':1000, 'yelp':2000}
     self.max_adv_num = self.max_adv_num_dict[args.dataset]
     self.args = args
 
     if data_type == "standard":
-      self.root = "attack-log/"
+      self.root = args.data_root_dir
       self.data_dir = os.path.join(self.root, args.dataset)
       self.model_dir = os.path.join(self.data_dir, args.model_type)
       self.csv_dir = os.path.join(self.model_dir, args.attack_type)
@@ -67,14 +67,18 @@ class AttackLoader():
   def get_attack_from_csv(self, dtype='test', batch_size=64,
                           model_wrapper=None):
     def clean_text(t):
-      t = t.replace("[", "")
-      t = t.replace("]", "")
+      t = t.replace("[[", "")
+      t = t.replace("]]", "")
       return t
 
     df = pd.read_csv(os.path.join(self.cache_dir, f"{dtype}.csv"))
-    df.loc[df.result_type == 'Failed', 'result_type'] = 0
-    df.loc[df.result_type == 'Successful', 'result_type'] = 1
-    df.loc[df.result_type == 'Skipped', 'result_type'] = -1
+    wrong_pred_idx = df.original_output != df.ground_truth_output
+    failed_adv_idx = ~wrong_pred_idx & (df.original_output == df.perturbed_output)
+    successful_adv_idx = ~wrong_pred_idx & (df.original_output != df.perturbed_output)
+    df.loc[wrong_pred_idx, 'result_type'] = -1
+    df.loc[successful_adv_idx, 'result_type'] = 1
+    df.loc[failed_adv_idx, 'result_type'] = 0
+    # print(df['result_type'].value_counts(normalize=True))
 
     assert self.scenario in ['random_sample', 'control_sample', 'control_success', 's1', 's2'], "Check split type"
     if self.scenario == 's1':
@@ -115,6 +119,8 @@ class AttackLoader():
         adv.loc[:, 'result_type'] = 1
       else:
         adv = split.loc[split.result_type == 1]
+        if self.args.unbalanced:
+          pass
       adv = adv.rename(columns={"perturbed_text": "text"})
       num_adv_samples = adv.shape[0]
 

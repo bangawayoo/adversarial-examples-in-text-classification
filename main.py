@@ -7,31 +7,48 @@ import pdb
 parser = argparse.ArgumentParser(description="Detect and defense attacked samples")
 
 parser.add_argument("--dataset", default="imdb", type=str,
-                    choices=["ag-news", "imdb", "yelp", "mnli", "sst2"],
+                    choices=["dbpedia14", "ag-news", "imdb", "yelp", "mnli", "sst2"],
                     help="classification dataset to use")
-parser.add_argument("--target_model", default="textattack/bert-base-uncased-imdb", type=str,
+parser.add_argument("--preprocess", default="standard", type=str,
+                    choices=["standard", "fgws"])
+parser.add_argument("--data_type", default="standard", type=str,
+                    choices=["standard", "fgws"])
+parser.add_argument("--target_model", default="textattack/bert-base-uncased-imdb", type=str, #textattack/roberta-base-SST-2
                     help="name of model (textattack pretrained model, path to ckpt)")
 parser.add_argument("--model_type", type=str, help="model type (e.g. bert, roberta, cnn)")
+parser.add_argument("--use_state_dict", action="store_true", default=False, help="whether to load model from a torch state dict")
+parser.add_argument("--data_root_dir", default='attack-log/original', help="root directory of data")
 
 parser.add_argument("--scenario", type=str, help="scenario that determines how the configure the adv. dataset")
 parser.add_argument("--include_fae", default=False, action='store_true', help="Include failed adversarial examples for detection as well")
+parser.add_argument("--unbalanced", default=False, type=str)
 parser.add_argument("--use_val", default=False, action='store_true')
 parser.add_argument("--cov_estimator", type=str, help="covariance esitmator",
                     choices=["OAS", "MCD", "None"])
 
+
+parser.add_argument("--pkl_test_path", default=" ", type=str,
+                    help="perturbed texts files with extension csv or pkl")
+parser.add_argument("--pkl_val_path", default=" ", type=str,
+                    help="perturbed texts files with extension csv or pkl")
 parser.add_argument("--attack_type", default='textfooler', type=str,
                     help="attack type for logging")
 parser.add_argument("--exp_name", default='tmp', type=str,
                     help="Name for logging")
 
 parser.add_argument("--fpr_threshold", default=0.10)
+parser.add_argument("--compute_bootstrap", default=False, action="store_true")
 parser.add_argument("--baseline", default=False, action="store_true")
 parser.add_argument("--visualize", default=False, action="store_true")
 
-parser.add_argument("--model_params_path", type=str, default="params/reduce_dim_false.json",
+parser.add_argument("--tune_params", default=False, action="store_true",
+                    help="Whether to use the found best_params.pkl if it exists")
+parser.add_argument("--model_params_path", type=str, default="params/attention_key-exclude.json",
                     help="path to json file containing params about probability modeling")
 parser.add_argument("--PCA_dim", type=int, default=None)
 parser.add_argument("--MCD_h", type=float, default=None)
+parser.add_argument("--ensemble", default=False, action="store_true")
+parser.add_argument("--adapt_ckpt", type=str, default=None)
 
 parser.add_argument("--gpu", default='0', type=str)
 parser.add_argument("--start_seed", default=0, type=int)
@@ -39,16 +56,6 @@ parser.add_argument("--end_seed", default=0, type=int)
 parser.add_argument("--mnli_option", default="matched", type=str,
                     choices=["matched", "mismatched"],
                     help="use matched or mismatched test set for MNLI")
-#Options for FGWS settings
-parser.add_argument("--preprocess", default="standard", type=str,
-                    choices=["standard", "fgws"])
-parser.add_argument("--data_type", default="standard", type=str,
-                    choices=["standard", "fgws"])
-parser.add_argument("--pkl_test_path", default=" ", type=str,
-                    help="perturbed texts files with extension csv or pkl")
-parser.add_argument("--pkl_val_path", default=" ", type=str,
-                    help="perturbed texts files with extension csv or pkl")
-
 
 args, _ = parser.parse_known_args()
 
@@ -60,6 +67,7 @@ from utils.miscellaneous import *
 from models.wrapper import BertWrapper
 from Detector import Detector
 from AttackLoader import AttackLoader
+
 
 model_type = args.target_model.replace("/","-")
 if args.exp_name:
@@ -77,7 +85,8 @@ if __name__ == "__main__":
     params = json.load(r)
   if args.PCA_dim:
     params['reduce_dim']['dim'] = args.PCA_dim
-  params['h'] = float(args.MCD_h) if args.MCD_h else None
+  if args.MCD_h:
+    params['h'] = float(args.MCD_h)
   num_params = len(glob.glob(os.path.join(args.log_path, "*.json")))
   with open(os.path.join(args.log_path, f"params-{num_params}.json"), "w") as w:
     json.dump(params, w)
@@ -92,8 +101,12 @@ if __name__ == "__main__":
   trainvalset, _, key = get_dataset(args)
   text_key, testset_key = key
   trainset, _ = split_dataset(trainvalset, split='trainval', split_ratio=1.0)
-  #Get features from the train set. Load from pickle if exists
-  feats = get_train_features(model_wrapper, args, batch_size=256, dataset=trainset, text_key=text_key, layer=params['layer_param']['cls_layer'])
+
+  logger.log.info(f"Loading train features")
+  s_time = time.time()
+  feats = get_train_features(model_wrapper, args, batch_size=256, dataset=trainset, text_key=text_key,
+                             layer=params['layer_param']['cls_layer'])
+  logger.log.info(f"Elapsed time: {time.time()-s_time}")
   feats = feats.numpy()
   s_time = time.time()
   reduced_feat, labels, reducer, scaler = preprocess_features(feats, params, args, logger)
@@ -103,8 +116,6 @@ if __name__ == "__main__":
   all_train_stats = [naive_train_stats, train_stats]
   all_estimators = [naive_estimators, estimators]
   logger.log.info(f"Elapsed time for model fitting : {time.time()-s_time}")
-
-
   if args.visualize:
     dir_name = os.path.dirname(args.log_path)
     path_to_feat = os.path.join(dir_name, 'feats.txt')

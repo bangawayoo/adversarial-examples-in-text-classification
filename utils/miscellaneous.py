@@ -142,7 +142,7 @@ def return_cov_estimator(name, params):
   if name == 'OAS':
     return OAS()
   elif name == 'MCD':
-    return MinCovDet(support_fraction=params['h'] if params['h'] else None)
+    return MinCovDet(support_fraction=params['h'] if params.get("h", None) else None)
   elif name == 'ledoit-wolf':
     return LedoitWolf()
   else:
