@@ -67,9 +67,6 @@ class Detector():
         confidence, conf_indices, conf_all = compute_dist(test_features, stats, use_marginal=False)
         confidence = conf_all[torch.arange(preds.numel()), preds]
 
-      if True:
-        save_array(confidence, path_to_conf)
-
       num_nans = sum(confidence == -float("Inf"))
       if num_nans != 0:
         self.logger.log.info(f"Warning : {num_nans} Nans in confidence")
